@@ -51,6 +51,7 @@ begun.
 - [Roadmap](docs/roadmap.md)
 - [Framework selection](docs/framework-selection.md)
 - [Executable acceptance harness design](docs/acceptance-harness-design.md)
+- [v1 implementation milestones](docs/implementation-milestones.md)
 - [Framework decision inputs](docs/framework-decision-input.md)
 - [Open questions](docs/open-questions.md)
 - [Architecture decision records](docs/adr/README.md)
@@ -67,7 +68,7 @@ begun.
 
 See the [roadmap](docs/roadmap.md) for authoritative boundaries. The framework
 and future executable acceptance-harness architectures are now documented.
-Next is a v1 implementation milestone plan pairing product work with development
-tests and acceptance scenarios—not application implementation yet. The
-repository-specific development and independent QA/acceptance skills govern
-those later sessions.
+The authoritative v1 implementation milestone plan now pairs each product
+increment with development tests and independent acceptance scenarios. No
+application implementation has begun. The repository-specific development and
+independent QA/acceptance skills govern those later implementation sessions.
