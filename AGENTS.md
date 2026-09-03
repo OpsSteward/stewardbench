@@ -83,9 +83,12 @@ Do not silently implement deferred work, including:
 If required work appears to depend on one of these, stop and document the need
 for product-owner/architecture review instead of smuggling it into scope.
 
-No application, frontend, or background-execution framework is selected.
-Framework names in decision inputs are candidates only; selection requires a
-separately authorized decision and an accepted ADR.
+The v1 application architecture is selected in
+[Framework selection](docs/framework-selection.md) and
+[ADR 0007](docs/adr/0007-django-monolith-and-postgresql-worker.md): a Django
+modular monolith, server-rendered UI with selective HTMX, Django ORM/migrations,
+and a PostgreSQL-backed worker. Do not replace or expand that stack silently;
+material change requires an ADR.
 
 ## Development behavior
 
@@ -141,5 +144,5 @@ application code.
 ## Future skills and harness
 
 Repository-specific development/QA skills and an executable StewardBench
-acceptance harness are planned after framework and background-execution
-architecture selection. Do not define or scaffold them in this file.
+acceptance harness are the next planned governance/quality work. Do not define
+or scaffold them in this file or without a separately authorized task.

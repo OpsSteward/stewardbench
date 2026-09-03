@@ -52,6 +52,11 @@ The first implementation milestones should prove the smallest end-to-end slice,
 then scale it to the corpus. Sophisticated evaluators and reporting are not
 prerequisites to human baseline creation and comparison.
 
+The accepted v1 implementation architecture is the Django modular monolith,
+server-rendered/HTMX UI, Django ORM/migrations, and PostgreSQL-backed worker in
+[Framework selection](framework-selection.md). This selection changes no
+release boundary in this roadmap.
+
 Run cancellation is unresolved and is listed in
 [Open questions](open-questions.md). Pause/resume is not in v1.
 
@@ -94,7 +99,8 @@ These are possibilities, not commitments:
 
 ## Explicit sequencing guardrails
 
-- Do not select a framework as part of this foundation phase.
+- Do not replace or expand the accepted v1 framework/process architecture
+  without an explicit decision and ADR.
 - Do not build Kubernetes before the Docker v1 workflow works.
 - Do not require CI, MCP, a CLI, comprehensive API coverage, object storage, or
   independent network-system access to complete v1.

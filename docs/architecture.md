@@ -1,8 +1,8 @@
 # Architecture
 
-Status: Authoritative logical architecture for StewardBench v1. This document
-defines boundaries and requirements without selecting an application framework
-or background-job technology.
+Status: Authoritative logical architecture for StewardBench v1. The technology
+realization is selected in [Framework selection](framework-selection.md) and
+[ADR 0007](adr/0007-django-monolith-and-postgresql-worker.md).
 
 ## Architectural goals
 
@@ -35,10 +35,10 @@ flowchart LR
     Secrets -. runtime injection .-> Worker
 ```
 
-The web application and worker are conceptual process roles. A later framework
-decision may package them from one codebase or process image. No diagram element
-implies a separate service, broker, or repository unless a later decision
-demonstrates the need.
+The web application and worker are distinct process roles packaged from one
+Django codebase and application image. PostgreSQL is also their durable work
+queue/state authority. No diagram element implies a separate service, broker,
+or repository.
 
 ## Architectural boundaries
 
@@ -219,11 +219,18 @@ bindings for each selected comparable member; it never substitutes the current
 QuestionVersion or a fresh object silently. A normal current-corpus run may use a
 newer version, but that item is NON_COMPARABLE to the older baseline.
 
-## Background execution requirements
+## Background execution architecture
 
-The later framework decision may choose an in-process scheduler, a separate
-worker using PostgreSQL-backed claims, or another small mechanism. It must meet
-these behaviors without assuming Celery, Redis, Kafka, or Kubernetes:
+A dedicated process from the Django application image polls and claims durable
+run work in PostgreSQL. Run plan/work rows are the domain queue; no separate
+generic job state or broker is introduced. Claims use short transactions and
+row locking, including `SKIP LOCKED` where appropriate, plus claim identity and
+lease/heartbeat or equivalent reconciliation metadata. Database locks are
+released before remote API calls. The detailed selection and recovery
+walkthrough are in [Framework selection](framework-selection.md).
+
+The worker must meet these behaviors without Celery, Redis, Kafka, or
+Kubernetes:
 
 - the browser may navigate away immediately after launch;
 - durable work and progress live in PostgreSQL, not only process memory;
@@ -244,6 +251,12 @@ these behaviors without assuming Celery, Redis, Kafka, or Kubernetes:
 - restart reconciliation either resumes safe unstarted work or records an
   explicit infrastructure error. It never overwrites a response already
   captured.
+
+The worker dispatches through a bounded I/O executor. Sequential mode admits
+one in-flight target request. Parallel dispatch respects the requested run
+limit and target maximum, including aggregate active work for the same target.
+The initial Docker topology uses one worker container; claim semantics preserve
+a safe path to additional worker replicas if later measurements justify them.
 
 At-most-once network side effects cannot be assumed when a process dies after a
 target accepts a request but before StewardBench records the response. v1
@@ -433,15 +446,15 @@ adversarial security-evaluation platform.
 ## Deployment boundary
 
 v1 runs with Docker and should have a development experience approximately
-equivalent to `docker compose up`. Conceptual runtime roles are the web
-application, PostgreSQL, and a worker/background process if the selected
-mechanism requires one. They may share one application image and codebase.
+equivalent to `docker compose up`. The normal long-running topology is one web
+container, one worker container, and PostgreSQL. Web and worker use the same
+Django application image/codebase with different entry points; migrations run
+as an explicit one-shot deployment step.
 
-No Kubernetes, Redis, Kafka, Celery, or separate API/frontend services are
-assumed. Configuration, health, stateless application-process behavior, and
-database migration boundaries should allow v2 Kubernetes deployment without a
-domain redesign. The actual framework and process topology are deferred to the
-separate decision phase.
+No Kubernetes, Redis, Kafka, Celery, or separate API/frontend service is part
+of v1. Configuration, health, stateless web-process behavior, restartable worker
+behavior, and migration boundaries allow the web and worker roles to become
+separate Kubernetes workloads in v2 without a domain redesign.
 
 ## Observability and performance data
 

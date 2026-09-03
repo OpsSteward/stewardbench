@@ -1,6 +1,8 @@
 # Framework decision inputs
 
-Status: Input to a separate architecture phase; no framework is selected here.
+Status: Decision input evaluated on 2026-09-03. The result is in
+[Framework selection](framework-selection.md) and
+[ADR 0007](adr/0007-django-monolith-and-postgresql-worker.md).
 
 ## Decision goal
 
@@ -11,7 +13,7 @@ technical team, not for speculative scale or fashionable separation.
 
 ## Required capabilities
 
-The later framework evaluation must demonstrate:
+The completed framework evaluation was required to demonstrate:
 
 | Area | Requirement |
 | --- | --- |
@@ -46,16 +48,17 @@ The later framework evaluation must demonstrate:
 8. How does the approach run in Docker Compose now and split into Kubernetes
    workloads later without redesign?
 
-## Candidates for later comparison
+## Candidates evaluated
 
-Django-based, FastAPI-based, and other justified Python approaches may be
-compared. Their names here are candidates, not endorsements. The exercise must
-not assume either a single server-rendered UI or a separate SPA/API pair before
-evaluating complexity against StewardBench's actual workflows.
+Django-based, FastAPI-based, and other justified Python approaches were eligible
+for comparison. Their names here were candidates, not endorsements. The
+completed exercise compared a Django server-rendered monolith, FastAPI with
+server-rendered templates, and FastAPI with a SPA against StewardBench's actual
+workflows.
 
 ## Required decision evidence
 
-The separate selection phase should produce:
+The selection phase was required to produce:
 
 - a small set of end-to-end architecture sketches for the credible candidates;
 - explicit component/dependency counts;
@@ -66,5 +69,7 @@ The separate selection phase should produce:
 - tradeoffs against v1 scope and small-team maintainability; and
 - a selected approach recorded in a new ADR.
 
-No implementation should begin until the product owner reviews this foundation
-and the separate framework decision is accepted.
+The evidence is recorded in [Framework selection](framework-selection.md). No
+implementation should begin until the product owner reviews this foundation and
+the framework decision, followed by the separately planned development skill,
+independent QA skill, acceptance harness, and milestone plan.

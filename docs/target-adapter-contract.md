@@ -14,8 +14,9 @@ question.
 
 The initial implementation will need an OpsSteward adapter supporting the v1
 and v2 question APIs. Compatibility may be supplied by one adapter with
-negotiated variants or separately versioned adapters; the later framework phase
-chooses the code shape. Both must satisfy this normalized contract.
+negotiated variants or separately versioned adapters after the actual wire
+contracts are confirmed. Either shape must satisfy this normalized contract and
+remain behind the selected Django application's adapter boundary.
 
 ## Responsibilities
 

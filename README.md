@@ -30,9 +30,9 @@ a baseline is observed historical performance—not universal ground truth.
 
 ## Status
 
-StewardBench is in the **product and architecture foundation** phase. This
-repository currently contains authoritative design documentation only. No
-application framework has been selected and no application implementation has
+StewardBench has a documented **product and architecture foundation**, including
+the selected v1 application architecture. This repository still contains
+documentation/reference material only; no application implementation has
 begun.
 
 ## Documentation
@@ -47,6 +47,7 @@ begun.
 - [Question corpus import specification](docs/question-corpus-import.md)
 - [Target adapter contract](docs/target-adapter-contract.md)
 - [Roadmap](docs/roadmap.md)
+- [Framework selection](docs/framework-selection.md)
 - [Framework decision inputs](docs/framework-decision-input.md)
 - [Open questions](docs/open-questions.md)
 - [Architecture decision records](docs/adr/README.md)
@@ -61,6 +62,7 @@ begun.
 - **v3+:** possible mature automation API, user-facing CLI, release gating,
   MCP adapters, advanced regrading, and broader analytics.
 
-See the [roadmap](docs/roadmap.md) for authoritative boundaries. The next phase
-is product-owner review followed by a separate framework and technology
-selection exercise—not implementation.
+See the [roadmap](docs/roadmap.md) for authoritative boundaries. Next is
+product-owner review of the [framework decision](docs/framework-selection.md),
+followed by separately authorized development and QA skills, acceptance
+harness, and milestone planning—not application implementation yet.

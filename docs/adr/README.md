@@ -12,7 +12,8 @@ specifications.
 | [0004](0004-docker-v1-and-durable-background-execution.md) | Accepted | Docker v1, Kubernetes v2, and durable background execution requirements |
 | [0005](0005-supported-product-api-evaluation-only-in-v1.md) | Accepted | Supported evaluated-product APIs only in v1 |
 | [0006](0006-local-authentication-and-two-role-rbac.md) | Accepted | Local authentication and exactly two v1 roles |
+| [0007](0007-django-monolith-and-postgresql-worker.md) | Accepted | Django modular monolith, server-rendered UI, Django ORM/migrations, and PostgreSQL-backed worker |
 
-No ADR selects an application or frontend framework. That decision belongs to a
-separate phase after product-owner review; see
-[Framework decision inputs](../framework-decision-input.md).
+ADR 0007 selects the v1 application architecture using the requirements in
+[Framework decision inputs](../framework-decision-input.md) and the analysis in
+[Framework selection](../framework-selection.md).

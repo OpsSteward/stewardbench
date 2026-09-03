@@ -1,9 +1,9 @@
 # Open questions
 
-Most product behavior is settled. The following questions require source-system
-evidence, product-owner choice, or the separate framework phase. None should be
-silently answered during implementation if it materially changes the specified
-behavior.
+Most product behavior and the v1 application architecture are settled. The
+following questions still require source-system evidence or product-owner
+choice. None should be silently answered during implementation if it materially
+changes the specified behavior.
 
 ## Integration evidence needed
 
@@ -26,21 +26,18 @@ behavior.
 
 4. **Run cancellation in v1.** A simple cooperative cancel could be useful for a
    long run, but introduces worker state and unstarted-item semantics. Decide
-   during framework selection whether it is sufficiently inexpensive for v1.
-   If omitted, make the deferral explicit in UI copy. Pause/resume remains out of
+   through product-owner review whether it is sufficiently valuable for v1. If
+   omitted, make the deferral explicit in UI copy. Pause/resume remains out of
    scope either way.
 
 ## Later technology decisions
 
-5. **Application framework and background execution mechanism.** This is the
-   next architecture phase; requirements are in
-   [Framework decision inputs](framework-decision-input.md).
-6. **Semantic comparator implementation/model/provider.** Select only after
+5. **Semantic comparator implementation/model/provider.** Select only after
    obtaining representative response pairs and defining an evaluation set for
    dangerous false-equivalence behavior.
-7. **LLM judge implementation/model/provider and initial rubric prompt.** The
+6. **LLM judge implementation/model/provider and initial rubric prompt.** The
    interface and retention requirements are set, but the provider/model are not.
-8. **Final brand source artwork.** The identity is approved, but final vector
+7. **Final brand source artwork.** The identity is approved, but final vector
    geometry, spacing, variants, and palette reference values require approved
    source assets.
 
