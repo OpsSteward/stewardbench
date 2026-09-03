@@ -401,8 +401,9 @@ ComparisonItems store/reference:
 - comparability check inputs;
 - change state: UNCHANGED, CHANGED, or NON_COMPARABLE;
 - exact-equality result;
-- semantic result: EQUIVALENT, MATERIAL_CHANGE, UNCERTAIN, NOT_RUN, or ERROR;
-- comparator identity/version and structured reasoning/evidence;
+- append-only semantic-result history: EQUIVALENT, MATERIAL_CHANGE, UNCERTAIN,
+  or ERROR, with a selected current leaf or explicit NOT_RUN projection;
+- comparator identity/version and structured rationale/error/input references;
 - review state/cause projection; and
 - timestamps.
 
@@ -423,8 +424,9 @@ A ComparisonItem references the human-review records used to derive any
 displayed transition at comparison time. Later append-only correction reviews do
 not rewrite that comparison; recomputation creates a new versioned comparison.
 
-If comparison is recomputed with a new comparator version, append a new
-Comparison/result set or versioned items; never overwrite the earlier behavior.
+Semantic re-evaluation appends a new semantic result that references the prior
+current result; it never overwrites the exact ComparisonItem or earlier
+semantic behavior. The unsuperseded semantic result is the current projection.
 
 ## Legacy import entities
 

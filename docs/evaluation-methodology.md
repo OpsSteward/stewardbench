@@ -192,10 +192,13 @@ the first implementation.
 2. Compare deliberately conservative normalized representations. Exact equality
    yields UNCHANGED without an expensive semantic call.
 3. If unequal, invoke the versioned semantic comparator.
-4. EQUIVALENT yields UNCHANGED.
-5. MATERIAL_CHANGE yields CHANGED and REQUIRED.
+4. EQUIVALENT is recorded as a separate semantic result. The immutable M6
+   exact result remains CHANGED, but semantic triage may resolve only the
+   exact-change-only review requirement.
+5. MATERIAL_CHANGE remains a semantic result alongside exact CHANGED and
+   retains/requires review.
 6. UNCERTAIN or ERROR does not yield equivalence; surface REQUIRED and preserve
-   the comparator failure/uncertainty.
+   the comparator failure/uncertainty without rewriting exact evidence.
 
 Normalization may standardize safe rendering and insignificant whitespace but
 must not erase facts, entity names, malformed output, unsupported claims, or

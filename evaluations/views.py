@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlencode
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Case, IntegerField, Value, When
+from django.db.models import Case, IntegerField, OuterRef, Prefetch, Subquery, Value, When
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -22,7 +22,14 @@ from .forms import (
     ReviewStateForm,
     ValidityForm,
 )
-from .models import Baseline, Comparison, ComparisonItem, EvaluationRun, Execution
+from .models import (
+    Baseline,
+    Comparison,
+    ComparisonItem,
+    EvaluationRun,
+    Execution,
+    SemanticComparisonResult,
+)
 from .services import (
     append_execution_comment,
     append_run_comment,
@@ -36,6 +43,7 @@ from .services import (
     mark_review_required,
     mark_reviewed_without_judgment,
     record_human_review,
+    reevaluate_semantic_comparison,
     rerun_source_run,
     retry_execution,
     run_progress,
@@ -47,6 +55,14 @@ from .services import (
 
 def _require_admin(request):
     require_admin(request.user)
+
+
+def _current_semantic_result_from_history(results):
+    """Select the unsuperseded append-only semantic result for a rendered item."""
+
+    history = list(results)
+    superseded_ids = {result.supersedes_id for result in history if result.supersedes_id}
+    return next((result for result in history if result.pk not in superseded_ids), None)
 
 
 def _filters_from_request(request):
@@ -228,9 +244,19 @@ def execution_detail(request, execution_id):
             "baseline_execution__current_human_review",
             "current_execution__current_human_review",
         )
-        .prefetch_related("baseline_execution__resolved_bindings")
+        .prefetch_related(
+            "baseline_execution__resolved_bindings",
+            Prefetch(
+                "semantic_results",
+                queryset=SemanticComparisonResult.objects.select_related("supersedes").order_by(
+                    "-created_at", "-id"
+                ),
+            ),
+        )
         .first()
     )
+    semantic_history = list(comparison_item.semantic_results.all()) if comparison_item else []
+    current_semantic_result = _current_semantic_result_from_history(semantic_history)
     return render(
         request,
         "evaluations/execution_detail.html",
@@ -251,6 +277,8 @@ def execution_detail(request, execution_id):
             "next_required": next_required,
             "comparison_item": comparison_item,
             "comparison_transition": comparison_human_transition(comparison_item) if comparison_item else None,
+            "semantic_history": semantic_history,
+            "current_semantic_result": current_semantic_result,
         },
     )
 
@@ -419,6 +447,12 @@ def comparison_detail(request, comparison_id):
         ),
         pk=comparison_id,
     )
+    current_semantic_results = SemanticComparisonResult.objects.filter(
+        superseded_by__isnull=True
+    ).order_by("-created_at", "-id")
+    semantic_outcome = current_semantic_results.filter(
+        comparison_item_id=OuterRef("pk")
+    ).values("outcome")[:1]
     items = comparison.items.select_related(
         "baseline_execution",
         "baseline_execution__current_human_review",
@@ -426,17 +460,29 @@ def comparison_detail(request, comparison_id):
         "current_execution__current_human_review",
         "current_execution__target_snapshot",
         "current_execution__build_snapshot",
-    )
+    ).prefetch_related(Prefetch("semantic_results", queryset=current_semantic_results))
     selected_state = request.GET.get("state", "")
     selected_outcome = request.GET.get("outcome", "")
     selected_review = request.GET.get("review", "")
     selected_transition = request.GET.get("transition", "")
+    selected_semantic = request.GET.get("semantic", "")
     if selected_state in ComparisonItem.ChangeState.values:
         items = items.filter(change_state=selected_state)
     if selected_outcome in (Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT):
         items = items.filter(current_execution__outcome=selected_outcome)
     if selected_review == Execution.ReviewState.REQUIRED:
         items = items.filter(current_execution__review_state=selected_review)
+    if selected_semantic in SemanticComparisonResult.Outcome.values:
+        items = items.filter(
+            semantic_results__superseded_by__isnull=True,
+            semantic_results__outcome=selected_semantic,
+        )
+    elif selected_semantic == "NOT_RUN":
+        items = items.filter(change_state=ComparisonItem.ChangeState.CHANGED).exclude(
+            pk__in=SemanticComparisonResult.objects.filter(
+                superseded_by__isnull=True
+            ).values("comparison_item_id")
+        )
     if selected_transition == "GOOD_TO_BAD":
         items = items.filter(
             baseline_execution__current_human_review__judgment="GOOD",
@@ -448,12 +494,22 @@ def comparison_detail(request, comparison_id):
             current_execution__current_human_review__judgment="GOOD",
         )
     items = items.annotate(
+        semantic_outcome=Subquery(semantic_outcome),
         triage_priority=Case(
             When(current_execution__outcome__in=(Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT), then=Value(1)),
             When(
                 baseline_execution__current_human_review__judgment="GOOD",
                 current_execution__current_human_review__judgment="BAD",
                 then=Value(2),
+            ),
+            When(
+                semantic_outcome__in=(
+                    SemanticComparisonResult.Outcome.MATERIAL_CHANGE,
+                    SemanticComparisonResult.Outcome.UNCERTAIN,
+                    SemanticComparisonResult.Outcome.ERROR,
+                ),
+                current_execution__review_state=Execution.ReviewState.REQUIRED,
+                then=Value(3),
             ),
             When(
                 change_state=ComparisonItem.ChangeState.CHANGED,
@@ -476,13 +532,40 @@ def comparison_detail(request, comparison_id):
         {
             "comparison": comparison,
             "summary": comparison_summary(comparison),
-            "item_rows": [(item, comparison_human_transition(item)) for item in items],
+            "item_rows": [
+                (
+                    item,
+                    comparison_human_transition(item),
+                    _current_semantic_result_from_history(item.semantic_results.all()),
+                )
+                for item in items
+            ],
             "selected_state": selected_state,
             "selected_outcome": selected_outcome,
             "selected_review": selected_review,
             "selected_transition": selected_transition,
+            "selected_semantic": selected_semantic,
         },
     )
+
+
+@login_required
+def semantic_reevaluate_view(request, item_id):
+    _require_admin(request)
+    item = get_object_or_404(ComparisonItem, pk=item_id)
+    if request.method != "POST":
+        return redirect("execution-detail", execution_id=item.current_execution_id)
+    try:
+        result = reevaluate_semantic_comparison(actor=request.user, comparison_item=item)
+    except ValidationError as error:
+        messages.error(request, error.messages[0])
+    else:
+        messages.success(
+            request,
+            f"Appended semantic result {result.outcome} using {result.provider_key} "
+            f"{result.comparator_version}; exact comparison history is unchanged.",
+        )
+    return redirect("execution-detail", execution_id=item.current_execution_id)
 
 
 @login_required

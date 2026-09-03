@@ -14,6 +14,11 @@ urlpatterns = [
     ),
     path("comparisons/", views.comparison_list, name="comparison-list"),
     path("comparisons/<int:comparison_id>/", views.comparison_detail, name="comparison-detail"),
+    path(
+        "comparison-items/<int:item_id>/semantic-reevaluate/",
+        views.semantic_reevaluate_view,
+        name="semantic-reevaluate",
+    ),
     path("runs/", views.run_list, name="run-list"),
     path("runs/launch/", views.launch_run_view, name="run-launch"),
     path("runs/launch/question/<int:question_id>/", views.launch_one_question_view, name="run-launch-one"),

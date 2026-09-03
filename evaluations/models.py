@@ -932,3 +932,69 @@ class ComparisonItem(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Comparison items cannot be deleted.")
+
+
+class SemanticComparisonResult(models.Model):
+    """One append-only semantic-triage observation for an exact M6 item.
+
+    ``ComparisonItem`` retains M6's immutable exact result.  Semantic results
+    form a replacement chain instead: a newer result references the prior
+    current result without altering it.  The unsuperseded leaf is the current
+    semantic projection for UI triage, while every historical comparator
+    conclusion remains available for calibration and explanation.
+    """
+
+    class Outcome(models.TextChoices):
+        EQUIVALENT = "EQUIVALENT", "Equivalent"
+        MATERIAL_CHANGE = "MATERIAL_CHANGE", "Material change"
+        UNCERTAIN = "UNCERTAIN", "Uncertain"
+        ERROR = "ERROR", "Comparator error"
+
+    comparison_item = models.ForeignKey(
+        ComparisonItem,
+        on_delete=models.PROTECT,
+        related_name="semantic_results",
+    )
+    supersedes = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="superseded_by",
+    )
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    provider_key = models.CharField(max_length=100)
+    model_identifier = models.CharField(max_length=160)
+    comparator_version = models.CharField(max_length=80)
+    prompt_version = models.CharField(max_length=80, blank=True)
+    input_fingerprint = models.CharField(max_length=64)
+    input_manifest = models.JSONField(default=dict, blank=True)
+    rationale = models.TextField(blank=True)
+    error_class = models.CharField(max_length=100, blank=True)
+    error_detail = models.TextField(blank=True)
+    raw_result = models.JSONField(default=dict, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(outcome__in=("EQUIVALENT", "MATERIAL_CHANGE", "UNCERTAIN", "ERROR")),
+                name="evaluations_semantic_result_outcome",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("comparison_item", "-created_at"),
+                name="eval_semantic_current_idx",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Semantic comparison results are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Semantic comparison results cannot be deleted.")

@@ -22,11 +22,13 @@ workflow:
 > Questions → Execute → Capture → Review → Baseline → Re-execute → Compare →
 > Review Changes
 
-The initial baseline is intentionally human-reviewed. M6 later runs use only
-versioned exact comparison, so an exact change is surfaced for human review
-without being called a regression or a correctness result. Conservative
-semantic comparison is a later milestone. A baseline is observed historical
-performance—not universal ground truth.
+The initial baseline is intentionally human-reviewed. Exact comparison records
+whether deliberately narrow normalized answer text changed, without calling a
+change a regression or a correctness result. M7 adds separate conservative
+semantic triage: only established equivalence can resolve an exact
+change-only review requirement; uncertainty and comparator failure remain
+visible for review. A baseline is observed historical performance—not
+universal ground truth.
 
 ## Status
 
@@ -40,8 +42,10 @@ target-revision-wide capacity, and conservative ambiguous-call recovery. M5
 adds attributed append-only human review, comments, validity decisions, and
 retry/rerun history. M6 adds named immutable Baselines, controlled replay using
 the exact historical QuestionVersion/bindings/concrete question, and versioned
-exact comparison. Semantic comparison and real OpsSteward wire-contract
-certification remain later milestones.
+exact comparison. M7 adds append-only, versioned semantic triage with a
+deterministic acceptance comparator; the real provider/model remains an
+explicit open decision. Real OpsSteward wire-contract certification remains a
+later milestone.
 
 ## Run with Docker
 
@@ -118,8 +122,8 @@ configuration, the worker foundation, Docker smoke, and DGX guidance.
 ## Roadmap at a glance
 
 - **v1:** Docker, PostgreSQL, local ADMIN/OPERATOR access, corpus import,
-  API-based execution, human review, immutable baselines, conservative change
-  detection, review triage, and basic trends.
+  API-based execution, human review, immutable baselines, conservative exact
+  and semantic triage, review workflows, and basic trends.
 - **v2:** Kubernetes, CI-triggered (non-gating) evaluations, and improvements
   justified by v1 operations.
 - **v3+:** possible mature automation API, user-facing CLI, release gating,

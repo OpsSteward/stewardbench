@@ -21,7 +21,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Subquery
 from django.utils import timezone
 
 from accounts.policy import require_admin
@@ -43,7 +43,16 @@ from .models import (
     HumanReview,
     ResolvedBinding,
     ReviewTracking,
+    SemanticComparisonResult,
     TargetSnapshot,
+)
+from .semantic import (
+    SemanticComparator,
+    SemanticComparatorFailure,
+    SemanticComparatorInput,
+    SemanticComparatorProtocolError,
+    SemanticComparatorResponse,
+    default_semantic_comparator,
 )
 
 
@@ -648,6 +657,259 @@ def record_exact_comparison(*, current_execution: Execution):
     return item
 
 
+def _semantic_applicability_reason(item: ComparisonItem) -> str | None:
+    """Return why M7 must not interpret this item as a semantic answer pair."""
+
+    baseline = item.baseline_execution
+    current = item.current_execution
+    if item.change_state != ComparisonItem.ChangeState.CHANGED or item.exact_equal is not False:
+        return "Semantic triage applies only to an M6 exact CHANGED pair."
+    if baseline.validity != Execution.Validity.VALID or current.validity != Execution.Validity.VALID:
+        return "INVALID evidence is excluded from semantic triage."
+    if baseline.outcome != Execution.Outcome.SUCCESS or current.outcome != Execution.Outcome.SUCCESS:
+        return "Semantic triage requires two successful answer observations."
+    if not baseline.raw_answer or not current.raw_answer:
+        return "Semantic triage requires two usable captured answers."
+    return None
+
+
+def _semantic_answer(execution: Execution) -> str:
+    return execution.display_answer or execution.raw_answer
+
+
+def _semantic_input_for_item(item: ComparisonItem) -> SemanticComparatorInput:
+    baseline = item.baseline_execution
+    current = item.current_execution
+    return SemanticComparatorInput(
+        question_version_id=baseline.question_version_id,
+        question_template=baseline.question_template,
+        concrete_question=baseline.submitted_question,
+        baseline_bindings=tuple(
+            (binding.name, binding.display_value)
+            for binding in baseline.resolved_bindings.order_by("name")
+        ),
+        current_bindings=tuple(
+            (binding.name, binding.display_value)
+            for binding in current.resolved_bindings.order_by("name")
+        ),
+        baseline_answer=_semantic_answer(baseline),
+        current_answer=_semantic_answer(current),
+    )
+
+
+def _semantic_input_manifest(item: ComparisonItem, comparison_input: SemanticComparatorInput) -> tuple[dict, str]:
+    """Persist non-secret references/hashes, not another copy of answer text."""
+
+    manifest = {
+        "baseline_execution_id": item.baseline_execution_id,
+        "current_execution_id": item.current_execution_id,
+        "question_version_id": comparison_input.question_version_id,
+        "question_template_hash": _exact_hash(comparison_input.question_template),
+        "concrete_question_hash": _exact_hash(comparison_input.concrete_question),
+        "baseline_bindings_hash": _exact_hash(
+            json.dumps(comparison_input.baseline_bindings, ensure_ascii=False, separators=(",", ":"))
+        ),
+        "current_bindings_hash": _exact_hash(
+            json.dumps(comparison_input.current_bindings, ensure_ascii=False, separators=(",", ":"))
+        ),
+        "baseline_answer_hash": _exact_hash(comparison_input.baseline_answer),
+        "current_answer_hash": _exact_hash(comparison_input.current_answer),
+        "exact_algorithm_version": item.comparison.algorithm_version,
+    }
+    fingerprint = _exact_hash(json.dumps(manifest, sort_keys=True, separators=(",", ":")))
+    return manifest, fingerprint
+
+
+def _safe_semantic_text(value, *, limit=2000, redact_values: tuple[str, ...] = ()) -> str:
+    """Keep comparator diagnostics bounded and remove secrets/duplicated inputs."""
+
+    text = str(value or "")
+    for secret in _runtime_secret_values():
+        text = text.replace(secret, "[redacted]")
+    # Comparison answers already live immutably on their Executions.  A
+    # provider response that echoes either complete input must not become a
+    # second answer store in semantic diagnostics or raw structured output.
+    for supplied_value in redact_values:
+        if supplied_value:
+            text = text.replace(supplied_value, "[answer referenced]")
+    return text[:limit]
+
+
+def _safe_semantic_json(value, *, redact_values: tuple[str, ...] = ()):
+    """Retain a bounded structured comparator response without answer/secret copies."""
+
+    if isinstance(value, dict):
+        return {
+            _safe_semantic_text(key, limit=120, redact_values=redact_values): _safe_semantic_json(
+                item, redact_values=redact_values
+            )
+            for key, item in list(value.items())[:40]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_safe_semantic_json(item, redact_values=redact_values) for item in list(value)[:40]]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return (
+            _safe_semantic_text(value, limit=1000, redact_values=redact_values)
+            if isinstance(value, str)
+            else value
+        )
+    return _safe_semantic_text(value, limit=1000, redact_values=redact_values)
+
+
+def _current_semantic_result(item: ComparisonItem) -> SemanticComparisonResult | None:
+    """Return the append-only chain leaf selected as current semantic triage."""
+
+    superseded_ids = SemanticComparisonResult.objects.filter(
+        comparison_item=item,
+        supersedes__isnull=False,
+    ).values("supersedes_id")
+    return (
+        SemanticComparisonResult.objects.filter(comparison_item=item)
+        .exclude(pk__in=Subquery(superseded_ids))
+        .order_by("-created_at", "-id")
+        .first()
+    )
+
+
+def _system_set_review_state(execution: Execution, state: str, cause: str):
+    """Append a system review transition without fabricating a human judgment."""
+
+    ReviewTracking.objects.create(execution=execution, state=state, actor=None, cause=cause)
+    Execution.objects.filter(pk=execution.pk).update(review_state=state)
+    execution.review_state = state
+
+
+def _is_exact_change_only_requirement(execution: Execution) -> bool:
+    latest = execution.review_tracking_events.order_by("-created_at", "-id").first()
+    return bool(
+        execution.review_state == Execution.ReviewState.REQUIRED
+        and latest
+        and latest.actor_id is None
+        and latest.cause.startswith("Exact comparison ")
+        and " CHANGED (comparison item " in latest.cause
+    )
+
+
+def _apply_semantic_triage(result: SemanticComparisonResult, current_execution: Execution):
+    """Project M7 attention conservatively while preserving human precedence."""
+
+    if result.outcome == SemanticComparisonResult.Outcome.EQUIVALENT:
+        if _is_exact_change_only_requirement(current_execution):
+            _system_set_review_state(
+                current_execution,
+                Execution.ReviewState.NONE,
+                f"Semantic comparison {result.comparator_version} EQUIVALENT "
+                f"(semantic result {result.pk}) resolved exact-change-only review",
+            )
+        return
+    if current_execution.review_state == Execution.ReviewState.NONE:
+        _system_set_review_state(
+            current_execution,
+            Execution.ReviewState.REQUIRED,
+            f"Semantic comparison {result.comparator_version} {result.outcome} "
+            f"(semantic result {result.pk}) requires review",
+        )
+
+
+@transaction.atomic
+def record_semantic_comparison(
+    *,
+    comparison_item: ComparisonItem,
+    comparator: SemanticComparator | None = None,
+) -> SemanticComparisonResult | None:
+    """Append semantic triage after M6 exact CHANGED without changing M6 evidence.
+
+    The item lock serializes re-evaluation.  A new result points to the prior
+    unsuperseded result, so an older comparator result can never become current
+    again after a later re-evaluation.
+    """
+
+    item = (
+        ComparisonItem.objects.select_for_update()
+        .select_related("comparison", "baseline_execution", "current_execution")
+        .prefetch_related(
+            "baseline_execution__resolved_bindings",
+            "current_execution__resolved_bindings",
+            "current_execution__review_tracking_events",
+        )
+        .get(pk=comparison_item.pk)
+    )
+    if _semantic_applicability_reason(item):
+        return None
+    comparison_input = _semantic_input_for_item(item)
+    manifest, fingerprint = _semantic_input_manifest(item, comparison_input)
+    implementation = comparator or default_semantic_comparator()
+    prior = _current_semantic_result(item)
+    started = time.monotonic()
+    input_answers = (comparison_input.baseline_answer, comparison_input.current_answer)
+    try:
+        response = implementation.compare(comparison_input)
+        if not isinstance(response, SemanticComparatorResponse):
+            raise SemanticComparatorProtocolError()
+        if response.outcome not in SemanticComparisonResult.Outcome.values:
+            raise SemanticComparatorProtocolError(
+                f"Unsupported semantic comparator outcome {response.outcome!r}."
+            )
+        outcome = response.outcome
+        rationale = _safe_semantic_text(response.rationale, redact_values=input_answers)
+        error_class = _safe_semantic_text(response.error_class, limit=100)
+        error_detail = _safe_semantic_text(response.error_detail, redact_values=input_answers)
+        raw_result = _safe_semantic_json(response.raw_result, redact_values=input_answers)
+    except SemanticComparatorFailure as error:
+        outcome = SemanticComparisonResult.Outcome.ERROR
+        rationale = ""
+        error_class = _safe_semantic_text(error.error_class, limit=100)
+        error_detail = _safe_semantic_text(error.detail, redact_values=input_answers)
+        raw_result = {}
+    except Exception:
+        # A comparator/provider exception may quote untrusted answer text or
+        # transport context.  Do not echo it into ordinary worker logs.
+        logger.warning("Semantic comparator failed unexpectedly for comparison item %s", item.pk)
+        outcome = SemanticComparisonResult.Outcome.ERROR
+        rationale = ""
+        error_class = "COMPARATOR_INTERNAL_ERROR"
+        error_detail = "Semantic comparator failed unexpectedly; review remains required."
+        raw_result = {}
+    elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
+    result = SemanticComparisonResult.objects.create(
+        comparison_item=item,
+        supersedes=prior,
+        outcome=outcome,
+        provider_key=_safe_semantic_text(implementation.provider_key, limit=100),
+        model_identifier=_safe_semantic_text(implementation.model_identifier, limit=160),
+        comparator_version=_safe_semantic_text(implementation.comparator_version, limit=80),
+        prompt_version=_safe_semantic_text(implementation.prompt_version, limit=80),
+        input_fingerprint=fingerprint,
+        input_manifest=manifest,
+        rationale=rationale,
+        error_class=error_class,
+        error_detail=error_detail,
+        raw_result=raw_result,
+        latency_ms=elapsed_ms,
+    )
+    _apply_semantic_triage(result, item.current_execution)
+    return result
+
+
+def reevaluate_semantic_comparison(*, actor, comparison_item: ComparisonItem, comparator: SemanticComparator | None = None):
+    """ADMIN-only semantic re-evaluation of stored M6 evidence; no target rerun."""
+
+    require_admin(actor)
+    result = record_semantic_comparison(comparison_item=comparison_item, comparator=comparator)
+    if result is None:
+        # ``comparison_item`` may carry a stale related Execution projection
+        # from a caller that has just recorded a validity decision.  Explain
+        # the actual persisted inapplicability rather than returning a vague
+        # error based on that stale in-memory object.
+        current_item = ComparisonItem.objects.select_related(
+            "comparison", "baseline_execution", "current_execution"
+        ).get(pk=comparison_item.pk)
+        raise ValidationError(
+            _semantic_applicability_reason(current_item) or "Semantic triage is not applicable."
+        )
+    return result
+
+
 def comparison_human_transition(item: ComparisonItem) -> str:
     """Display live human context without turning comparison into correctness."""
 
@@ -659,14 +921,34 @@ def comparison_human_transition(item: ComparisonItem) -> str:
 
 
 def comparison_summary(comparison: Comparison) -> dict[str, int]:
-    """Transparent M6 triage counts from persisted comparison items."""
+    """Transparent M6 exact and M7 semantic triage counts."""
 
     items = comparison.items.select_related("current_execution", "baseline_execution")
+    current_semantic = SemanticComparisonResult.objects.filter(
+        comparison_item__comparison=comparison,
+        superseded_by__isnull=True,
+    )
     return {
         "total": items.count(),
+        # Keep legacy keys as exact M6 counts; M7 never rewrites them.
         "unchanged": items.filter(change_state=ComparisonItem.ChangeState.UNCHANGED).count(),
         "changed": items.filter(change_state=ComparisonItem.ChangeState.CHANGED).count(),
         "non_comparable": items.filter(change_state=ComparisonItem.ChangeState.NON_COMPARABLE).count(),
+        "semantic_equivalent": current_semantic.filter(
+            outcome=SemanticComparisonResult.Outcome.EQUIVALENT
+        ).count(),
+        "semantic_changed": current_semantic.filter(
+            outcome=SemanticComparisonResult.Outcome.MATERIAL_CHANGE
+        ).count(),
+        "semantic_uncertain": current_semantic.filter(
+            outcome=SemanticComparisonResult.Outcome.UNCERTAIN
+        ).count(),
+        "semantic_error": current_semantic.filter(
+            outcome=SemanticComparisonResult.Outcome.ERROR
+        ).count(),
+        "semantic_not_run": items.filter(change_state=ComparisonItem.ChangeState.CHANGED)
+        .exclude(pk__in=current_semantic.values("comparison_item_id"))
+        .count(),
         "error": items.filter(current_execution__outcome=Execution.Outcome.ERROR).count(),
         "timeout": items.filter(current_execution__outcome=Execution.Outcome.TIMEOUT).count(),
         "pending_review": items.filter(current_execution__review_state=Execution.ReviewState.REQUIRED).count(),
@@ -1307,7 +1589,11 @@ def _complete_execution(claim: ExecutionClaim, *, outcome, values):
     # The item is appended only after the current terminal observation exists.
     # The comparison service never mutates it later, including after validity
     # corrections or future normalization/comparator changes.
-    record_exact_comparison(current_execution=execution)
+    comparison_item = record_exact_comparison(current_execution=execution)
+    if comparison_item:
+        # M7 is exact-first: semantic work only receives a persisted terminal
+        # comparison item and never changes the target Execution observation.
+        record_semantic_comparison(comparison_item=comparison_item)
     run = EvaluationRun.objects.select_for_update().get(pk=execution.run_id)
     if not run.is_terminal and run.inter_question_delay_seconds:
         run.next_dispatch_at = now + timedelta(seconds=float(run.inter_question_delay_seconds))

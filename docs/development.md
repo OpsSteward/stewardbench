@@ -1,8 +1,8 @@
 # Development and deployment
 
-This page documents the implemented M0 foundation through M6 exact baseline
-comparison. Semantic comparison, conversations, and real OpsSteward
-wire-contract certification remain later milestones.
+This page documents the implemented M0 foundation through M7 conservative
+semantic triage. Conversation execution and real OpsSteward wire-contract
+certification remain later milestones.
 
 ## Runtime and configuration
 
@@ -248,6 +248,43 @@ Comparison records and their per-pair hashes/reasons are immutable. The
 comparison list/detail and execution workstation expose M6 summary counters,
 URL-addressable triage filters, NON_COMPARABLE reasons, and baseline/current
 answers with their independent target/build, review, and validity context.
+
+## M7 conservative semantic triage
+
+M7 leaves the M6 `exact-v1` ComparisonItem immutable. Semantic triage runs only
+for a VALID, successful controlled pair whose exact result is `CHANGED`; exact
+`UNCHANGED`, `NON_COMPARABLE`, failure, and invalid evidence do not receive a
+semantic verdict. A `SemanticComparisonResult` is a separate append-only record
+with the baseline/current Execution IDs, exact QuestionVersion and frozen-input
+hashes, provider/model/comparator/prompt identities, safe concise rationale or
+failure detail, and timing. A newer re-evaluation points to the previous result;
+the unsuperseded leaf is the current semantic projection, while all older
+results remain visible.
+
+The offline M7 comparator boundary is provider-neutral. The production default
+is deliberately `unconfigured`, which persists an attributable `ERROR` and
+keeps review required; it never guesses equivalence. The repository’s
+deterministic scripted fake comparator supports `EQUIVALENT`,
+`MATERIAL_CHANGE`, `UNCERTAIN`, and failure/malformed cases for PostgreSQL
+acceptance. A live provider/model, credentials, prompt, data-transfer terms,
+and calibration remain open product/security decisions and are not configured
+or claimed here.
+
+`EQUIVALENT` means only that the comparator established harmless difference for
+triage. It may append a system review-tracking event that clears the M6
+change-only `REQUIRED` projection to `NONE`; it does not change the immutable
+exact `CHANGED` result, baseline answer, raw answer, validity, execution
+outcome, or human GOOD/BAD. `MATERIAL_CHANGE`, `UNCERTAIN`, and `ERROR` retain
+or create `REQUIRED`; an existing ADMIN `REVIEWED` projection is never replaced.
+This keeps semantic/human disagreement visible—especially a semantically
+equivalent response to a BAD baseline, which is never synthesized as GOOD.
+
+Comparison and Execution detail show exact M6 evidence and semantic M7 triage
+as separate labeled fields, with comparator identity/rationale, immutable
+history, review state, human judgment, and side-by-side baseline/current
+answers. Comparison counters and URL-addressable filters distinguish exact
+results, semantic equivalent/material/uncertain/error/not-run states, failures,
+and pending human review.
 
 ## Reconciled source corpus
 
