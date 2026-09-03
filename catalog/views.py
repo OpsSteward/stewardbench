@@ -10,6 +10,10 @@ from accounts.policy import require_admin
 
 from .forms import (
     BindingDefinitionFormSet,
+    ConversationScenarioForm,
+    ConversationScenarioMetadataForm,
+    ConversationScenarioVersionForm,
+    ConversationTurnFormSet,
     DomainCreateForm,
     DomainUpdateForm,
     EnvironmentCreateForm,
@@ -27,6 +31,7 @@ from .forms import (
 )
 from .models import (
     Domain,
+    ConversationScenario,
     Environment,
     EvaluationTarget,
     HistoricalFixture,
@@ -36,6 +41,8 @@ from .models import (
 )
 from .services import (
     create_domain,
+    create_conversation_scenario,
+    create_conversation_scenario_version,
     create_environment,
     create_historical_fixture,
     create_product,
@@ -46,6 +53,7 @@ from .services import (
     create_target_revision,
     set_question_lifecycle,
     update_domain,
+    update_conversation_scenario_metadata,
     update_environment,
     update_product,
     update_question_metadata,
@@ -78,6 +86,21 @@ def _binding_values(formset):
         }
         for row in formset.cleaned_data
         if row and row.get("name") and not row.get("DELETE")
+    ]
+
+
+def _conversation_turn_values(formset):
+    return [
+        {
+            "prompt_template": row.get("prompt_template", ""),
+            "canonical_question_version": row.get("canonical_question_version"),
+            "static_bindings": row.get("static_bindings") or {},
+            "required_for_overall": row.get("required_for_overall", True),
+        }
+        for row in formset.cleaned_data
+        if row
+        and not row.get("DELETE")
+        and (row.get("prompt_template", "").strip() or row.get("canonical_question_version"))
     ]
 
 
@@ -585,3 +608,139 @@ def question_lifecycle_update(request, stable_id, lifecycle):
     else:
         messages.success(request, f"Question {question.stable_id} is now {lifecycle}.")
     return redirect("question-detail", stable_id=question.stable_id)
+
+
+@login_required
+def conversation_scenario_list(request):
+    scenarios = ConversationScenario.objects.select_related("domain").prefetch_related("tags", "versions")
+    return render(request, "catalog/conversation_scenario_list.html", {"scenarios": scenarios})
+
+
+@login_required
+def conversation_scenario_detail(request, stable_id):
+    scenario = get_object_or_404(
+        ConversationScenario.objects.select_related("domain", "created_by", "updated_by").prefetch_related(
+            "tags",
+            "versions__created_by",
+            "versions__turns__canonical_question",
+            "versions__turns__canonical_question_version",
+        ),
+        stable_id=stable_id,
+    )
+    from evaluations.models import ConversationAttempt
+
+    attempts = (
+        ConversationAttempt.objects.filter(scenario_version__scenario=scenario)
+        .select_related("run", "run__target_snapshot", "scenario_version")
+        .order_by("-run__created_at")
+    )
+    return render(
+        request,
+        "catalog/conversation_scenario_detail.html",
+        {
+            "scenario": scenario,
+            "current_version": scenario.current_version,
+            "versions": scenario.versions.all(),
+            "attempts": attempts,
+        },
+    )
+
+
+@login_required
+def conversation_scenario_create(request):
+    _require_admin(request)
+    form = ConversationScenarioForm(request.POST or None)
+    turn_formset = ConversationTurnFormSet(request.POST or None, prefix="turns")
+    if request.method == "POST" and form.is_valid() and turn_formset.is_valid():
+        try:
+            scenario = create_conversation_scenario(
+                actor=request.user,
+                turns=_conversation_turn_values(turn_formset),
+                **form.cleaned_data,
+            )
+        except (PermissionDenied, ValidationError) as error:
+            _service_error(form, error)
+        else:
+            messages.success(request, f"Conversation scenario {scenario.stable_id} created.")
+            return redirect("conversation-scenario-detail", stable_id=scenario.stable_id)
+    return render(
+        request,
+        "catalog/conversation_scenario_form.html",
+        {"form": form, "turn_formset": turn_formset, "heading": "Create conversation scenario"},
+    )
+
+
+@login_required
+def conversation_scenario_update(request, stable_id):
+    _require_admin(request)
+    scenario = get_object_or_404(ConversationScenario, stable_id=stable_id)
+    form = ConversationScenarioMetadataForm(
+        request.POST or None,
+        initial={
+            "name": scenario.name,
+            "description": scenario.description,
+            "lifecycle": scenario.lifecycle,
+            "domain": scenario.domain,
+            "tags": scenario.tags.all(),
+        },
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            update_conversation_scenario_metadata(actor=request.user, scenario=scenario, **form.cleaned_data)
+        except (PermissionDenied, ValidationError) as error:
+            _service_error(form, error)
+        else:
+            messages.success(request, f"Conversation scenario {scenario.stable_id} metadata updated.")
+            return redirect("conversation-scenario-detail", stable_id=scenario.stable_id)
+    return _render_form(
+        request,
+        form=form,
+        heading=f"Edit metadata for {scenario.stable_id}",
+        cancel_url="conversation-scenario-list",
+    )
+
+
+@login_required
+def conversation_scenario_version_create(request, stable_id):
+    _require_admin(request)
+    scenario = get_object_or_404(ConversationScenario, stable_id=stable_id)
+    current = scenario.current_version
+    initial_turns = []
+    if current:
+        initial_turns = [
+            {
+                "prompt_template": turn.prompt_template,
+                "canonical_question_version": turn.canonical_question_version,
+                "static_bindings": turn.static_bindings,
+                "required_for_overall": turn.required_for_overall,
+            }
+            for turn in current.turns.all()
+        ]
+    form = ConversationScenarioVersionForm(
+        request.POST or None,
+        initial={"definition": current.definition if current else ""},
+    )
+    turn_formset = ConversationTurnFormSet(request.POST or None, prefix="turns", initial=initial_turns)
+    if request.method == "POST" and form.is_valid() and turn_formset.is_valid():
+        try:
+            version = create_conversation_scenario_version(
+                actor=request.user,
+                scenario=scenario,
+                turns=_conversation_turn_values(turn_formset),
+                **form.cleaned_data,
+            )
+        except (PermissionDenied, ValidationError) as error:
+            _service_error(form, error)
+        else:
+            messages.success(request, f"Scenario version {version.version_number} created.")
+            return redirect("conversation-scenario-detail", stable_id=scenario.stable_id)
+    return render(
+        request,
+        "catalog/conversation_scenario_form.html",
+        {
+            "form": form,
+            "turn_formset": turn_formset,
+            "heading": f"New version for {scenario.stable_id}",
+            "scenario": scenario,
+        },
+    )

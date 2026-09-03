@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from accounts.policy import require_admin
-from catalog.models import Question
+from catalog.models import ConversationScenario, Question
 
 from .forms import (
     BaselinePromotionForm,
@@ -18,6 +18,7 @@ from .forms import (
     CommentForm,
     ControlledComparisonRunForm,
     HumanReviewForm,
+    LaunchConversationForm,
     LaunchRunForm,
     ReviewStateForm,
     ValidityForm,
@@ -26,6 +27,7 @@ from .models import (
     Baseline,
     Comparison,
     ComparisonItem,
+    ConversationAttempt,
     EvaluationRun,
     Execution,
     SemanticComparisonResult,
@@ -39,6 +41,7 @@ from .services import (
     create_baseline,
     eligible_question_count,
     launch_controlled_comparison,
+    launch_conversation_scenario,
     launch_run,
     mark_review_required,
     mark_reviewed_without_judgment,
@@ -46,6 +49,7 @@ from .services import (
     reevaluate_semantic_comparison,
     rerun_source_run,
     retry_execution,
+    retry_conversation_attempt,
     run_progress,
     run_review_metrics,
     set_baseline_active,
@@ -99,7 +103,7 @@ def run_detail(request, run_id):
         pk=run_id,
     )
     executions = (
-        run.executions.select_related("question_version", "current_human_review", "invalidated_by")
+        run.executions.select_related("question_version", "current_human_review", "invalidated_by", "conversation_turn")
         .prefetch_related("resolved_bindings")
         .order_by("question_order")
     )
@@ -113,6 +117,7 @@ def run_detail(request, run_id):
             "executions": executions,
             "run_comment_form": CommentForm(),
             "baseline_promotion_form": BaselinePromotionForm(),
+            "conversation_attempt": getattr(run, "conversation_attempt", None),
         },
     )
 
@@ -194,6 +199,10 @@ def execution_detail(request, execution_id):
             "invalidated_by",
             "source_execution",
             "source_execution__run",
+            "conversation_attempt",
+            "conversation_attempt__scenario_version",
+            "conversation_attempt__scenario_version__scenario",
+            "conversation_turn",
         ).prefetch_related(
             "resolved_bindings",
             "comments__author",
@@ -279,6 +288,13 @@ def execution_detail(request, execution_id):
             "comparison_transition": comparison_human_transition(comparison_item) if comparison_item else None,
             "semantic_history": semantic_history,
             "current_semantic_result": current_semantic_result,
+            "conversation_transcript": (
+                execution.run.executions.select_related("conversation_turn", "current_human_review")
+                .filter(conversation_attempt=execution.conversation_attempt)
+                .order_by("conversation_turn__ordinal")
+                if execution.conversation_attempt_id
+                else None
+            ),
         },
     )
 
@@ -340,6 +356,7 @@ def baseline_detail(request, baseline_id):
             "state_form": BaselineStateForm(initial={"is_active": not baseline.is_active}),
             "comparison_form": ControlledComparisonRunForm(
                 baseline=baseline,
+                conversation_required=ConversationAttempt.objects.filter(run=baseline.source_run).exists(),
                 initial={"target": baseline.source_target_id},
             ),
         },
@@ -400,7 +417,8 @@ def launch_controlled_comparison_view(request, baseline_id):
     baseline = get_object_or_404(Baseline.objects.select_related("source_target"), pk=baseline_id)
     if request.method != "POST":
         return redirect("baseline-detail", baseline_id=baseline.pk)
-    form = ControlledComparisonRunForm(request.POST, baseline=baseline)
+    conversation_required = ConversationAttempt.objects.filter(run=baseline.source_run).exists()
+    form = ControlledComparisonRunForm(request.POST, baseline=baseline, conversation_required=conversation_required)
     if form.is_valid():
         try:
             run = launch_controlled_comparison(
@@ -790,3 +808,49 @@ def launch_one_question_view(request, question_id):
             "eligible_count": 1,
         },
     )
+
+
+@login_required
+def launch_conversation_scenario_view(request, stable_id):
+    _require_admin(request)
+    scenario = get_object_or_404(ConversationScenario, stable_id=stable_id)
+    if request.method == "POST":
+        form = LaunchConversationForm(request.POST)
+        if form.is_valid():
+            try:
+                run = launch_conversation_scenario(
+                    actor=request.user,
+                    scenario=scenario,
+                    target=form.cleaned_data["target"],
+                )
+            except (PermissionDenied, ValidationError) as error:
+                form.add_error(None, error)
+            else:
+                messages.success(request, f"Conversation Run {run.id} was created from turn 1 with a fresh target session.")
+                return redirect("run-detail", run_id=run.pk)
+    else:
+        form = LaunchConversationForm()
+    return render(
+        request,
+        "evaluations/conversation_launch.html",
+        {"form": form, "scenario": scenario, "version": scenario.current_version},
+    )
+
+
+@login_required
+def retry_conversation_attempt_view(request, attempt_id):
+    _require_admin(request)
+    attempt = get_object_or_404(ConversationAttempt, pk=attempt_id)
+    if request.method != "POST":
+        return redirect("run-detail", run_id=attempt.run_id)
+    try:
+        run = retry_conversation_attempt(
+            actor=request.user,
+            attempt=attempt,
+            retry_request_key=request.POST.get("retry_request_key"),
+        )
+    except ValidationError as error:
+        messages.error(request, error.messages[0])
+        return redirect("run-detail", run_id=attempt.run_id)
+    messages.success(request, f"Created complete conversation retry Run {run.id} from turn 1 in a fresh session.")
+    return redirect("run-detail", run_id=run.pk)

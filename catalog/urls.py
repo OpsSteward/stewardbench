@@ -46,4 +46,21 @@ urlpatterns = [
         views.question_lifecycle_update,
         name="question-lifecycle-update",
     ),
+    path("conversation-scenarios/", views.conversation_scenario_list, name="conversation-scenario-list"),
+    path("conversation-scenarios/new/", views.conversation_scenario_create, name="conversation-scenario-create"),
+    path(
+        "conversation-scenarios/<str:stable_id>/",
+        views.conversation_scenario_detail,
+        name="conversation-scenario-detail",
+    ),
+    path(
+        "conversation-scenarios/<str:stable_id>/edit/",
+        views.conversation_scenario_update,
+        name="conversation-scenario-update",
+    ),
+    path(
+        "conversation-scenarios/<str:stable_id>/versions/new/",
+        views.conversation_scenario_version_create,
+        name="conversation-scenario-version-create",
+    ),
 ]

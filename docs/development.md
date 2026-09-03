@@ -1,8 +1,8 @@
 # Development and deployment
 
-This page documents the implemented M0 foundation through M7 conservative
-semantic triage. Conversation execution and real OpsSteward wire-contract
-certification remain later milestones.
+This page documents the implemented M0 foundation through M8 ordered
+conversation scenarios. Real OpsSteward wire-contract certification remains a
+separate, later integration milestone.
 
 ## Runtime and configuration
 
@@ -33,7 +33,7 @@ for the deployed HTTPS origin. Never put `.env` into an image or commit it.
 - `worker`: the same image running `python manage.py run_worker`; and
 - `db`: PostgreSQL 17.11 with the named `postgres_data` volume.
 
-The worker performs M4 durable execution. A browser request creates the
+The worker performs M4 durable execution and M8 ordered conversation turns. A browser request creates the
 complete Run/Execution manifest in PostgreSQL and returns; worker processes
 later claim eligible Executions. It never holds a database transaction across a
 target call. Both application services wait for PostgreSQL health.
@@ -285,6 +285,59 @@ history, review state, human judgment, and side-by-side baseline/current
 answers. Comparison counters and URL-addressable filters distinguish exact
 results, semantic equivalent/material/uncertain/error/not-run states, failures,
 and pending human review.
+
+## M8 ordered conversation scenarios
+
+An ADMIN manages a stable `ConversationScenario` and creates a new immutable
+`ConversationScenarioVersion` whenever its exact ordered turns, required-turn
+status, canonical QuestionVersion links, static bindings, or expected session
+behavior changes. A ScenarioVersion owns ordered `ConversationTurn` records;
+the stable scenario contains no mutable executable prompt text. OPERATOR may
+browse scenario/version/run evidence but cannot create, version, launch,
+review, or retry a scenario.
+
+Launching an ACTIVE scenario requires a current target revision that declares
+both the supported question API and `CONVERSATION_SESSION` capability. The
+launch creates a normal durable EvaluationRun with sequential actual
+concurrency, a `ConversationAttempt`, and one immutable Execution per turn.
+The worker opens exactly one target session before Turn 1, persists its
+non-secret identity and adapter-safe metadata, then submits later turns in
+strict ordinal order using that same identity. Target output is always answer
+data; it is never interpreted as StewardBench configuration or instructions.
+
+Every turn retains the concrete submitted prompt, answer/raw evidence, latency,
+target-session request evidence, outcome, and ordinary M5 review history. A
+human BAD or semantic result does not affect worker control flow. A recoverable
+turn error can retain the session and continue later turns. If the adapter says
+continuity is unusable or unknown—including M4 stale submission ambiguity—the
+attempt is marked unusable, dependent turns become explicit
+`SESSION_CONTINUITY_BLOCKED` observations without target requests, and no new
+session is silently created.
+
+The transcript is shown in ordinal order on the Run detail alongside per-turn
+review controls and prior context. The derived attempt result is `GOOD` only
+when every required terminal turn is human GOOD; it is `BAD` if a required turn
+is human BAD, `NOT_FULLY_REVIEWED` when required successful turns lack a human
+judgment, and `EXECUTION_INCOMPLETE` while a required turn has error/timeout or
+has not reached a terminal answer observation. Semantic `EQUIVALENT` never
+supplies human GOOD.
+
+Conversation retry is deliberately whole-attempt only: it creates a new
+EvaluationRun, ConversationAttempt, correlation IDs, and a fresh target session
+from Turn 1, while preserving the original transcript unchanged. Independent
+retry/rerun of a dependent conversation turn is rejected. Controlled baseline
+replay similarly starts fresh but reuses the baseline's exact ScenarioVersion,
+turn identities/order, frozen prompts, and frozen bindings. M6 exact and M7
+semantic comparison stay per-turn; conversation summary remains derived from
+those corresponding turn observations rather than a new score.
+
+`RUBIN-CONV-01` is the explicit repository-controlled source mapping for
+PROFILE rows 187, 190, and 193–196. PROFILE rows 197–202 remain preserved as
+standalone canonical Questions with deferred grouping; no relationship is
+guessed. The deterministic fake target independently journals session IDs,
+correlation IDs, prompts, ordinal order, request counts, recoverable errors,
+and session loss. It is the routine M8 acceptance target. No real OpsSteward
+conversation adapter is claimed until an authoritative wire contract exists.
 
 ## Reconciled source corpus
 

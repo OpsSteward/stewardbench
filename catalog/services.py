@@ -7,6 +7,9 @@ from accounts.policy import require_admin
 
 from .models import (
     BindingDefinition,
+    ConversationScenario,
+    ConversationScenarioVersion,
+    ConversationTurn,
     Domain,
     Environment,
     EvaluationTarget,
@@ -213,6 +216,10 @@ def create_question(
     evaluation_guidance="", bindings=None
 ):
     require_admin(actor)
+    if kind == Question.Kind.CONVERSATION:
+        raise ValidationError(
+            "Create a ConversationScenario for ordered conversation behavior; it creates the paired CONVERSATION Question."
+        )
     question = _validate_and_save(
         Question(
             stable_id=stable_id,
@@ -242,12 +249,17 @@ def create_question(
 @transaction.atomic
 def update_question_metadata(*, actor, question, domain, tags, rationale):
     require_admin(actor)
-    question.domain = domain
-    question.rationale = rationale
-    question.updated_by = actor
-    question = _validate_and_save(question)
-    question.tags.set(tags)
-    return question
+    locked_question = Question.objects.select_for_update().get(pk=question.pk)
+    if locked_question.kind == Question.Kind.CONVERSATION and hasattr(locked_question, "conversation_scenario"):
+        raise ValidationError(
+            "Conversation companion Question metadata is managed with its ConversationScenario."
+        )
+    locked_question.domain = domain
+    locked_question.rationale = rationale
+    locked_question.updated_by = actor
+    locked_question = _validate_and_save(locked_question)
+    locked_question.tags.set(tags)
+    return locked_question
 
 
 @transaction.atomic
@@ -257,6 +269,10 @@ def create_question_version(
 ):
     require_admin(actor)
     locked_question = Question.objects.select_for_update().get(pk=question.pk)
+    if locked_question.kind == Question.Kind.CONVERSATION and hasattr(locked_question, "conversation_scenario"):
+        raise ValidationError(
+            "Conversation companion Questions are versioned through a complete ConversationScenarioVersion."
+        )
     current = locked_question.versions.filter(valid_to__isnull=True).first()
     transition_at = effective_at or timezone.now()
     if current and transition_at <= current.valid_from:
@@ -292,6 +308,10 @@ def set_question_lifecycle(*, actor, question, lifecycle):
     if lifecycle not in Question.Lifecycle.values:
         raise ValidationError({"lifecycle": "Unsupported question lifecycle."})
     locked_question = Question.objects.select_for_update().get(pk=question.pk)
+    if locked_question.kind == Question.Kind.CONVERSATION and hasattr(locked_question, "conversation_scenario"):
+        raise ValidationError(
+            "Conversation companion Question lifecycle is managed with its ConversationScenario."
+        )
     if lifecycle == Question.Lifecycle.ACTIVE:
         if locked_question.domain_id is None:
             raise ValidationError({"domain": "A domain is required before activation."})
@@ -300,6 +320,182 @@ def set_question_lifecycle(*, actor, question, lifecycle):
     locked_question.lifecycle = lifecycle
     locked_question.updated_by = actor
     return _validate_and_save(locked_question)
+
+
+def _scenario_turn_values(*, scenario_version, actor, turns):
+    """Validate and materialize one immutable, gap-free turn definition."""
+
+    normalized = []
+    for ordinal, supplied in enumerate(turns or (), start=1):
+        supplied = dict(supplied)
+        prompt_template = str(supplied.get("prompt_template", "")).strip()
+        canonical_version = supplied.get("canonical_question_version")
+        canonical_question = supplied.get("canonical_question")
+        if canonical_version:
+            if canonical_question and canonical_question.pk != canonical_version.question_id:
+                raise ValidationError("A canonical turn's QuestionVersion must belong to its selected Question.")
+            canonical_question = canonical_version.question
+            # A linked canonical definition is the authoritative exact prompt.
+            # This avoids a second mutable copy of existing corpus text.
+            if prompt_template and prompt_template != canonical_version.question_text:
+                raise ValidationError(
+                    "A linked canonical QuestionVersion must use its exact question text as the turn prompt."
+                )
+            prompt_template = canonical_version.question_text
+        if not prompt_template:
+            raise ValidationError(f"Conversation turn {ordinal} needs a prompt or canonical QuestionVersion.")
+        turn = ConversationTurn(
+            scenario_version=scenario_version,
+            ordinal=ordinal,
+            stable_turn_id=str(supplied.get("stable_turn_id") or f"{scenario_version.scenario.stable_id}.{ordinal}"),
+            prompt_template=prompt_template,
+            canonical_question=canonical_question,
+            canonical_question_version=canonical_version,
+            static_bindings=supplied.get("static_bindings") or {},
+            required_for_overall=bool(supplied.get("required_for_overall", True)),
+            source_sheet=str(supplied.get("source_sheet") or ""),
+            source_row=supplied.get("source_row") or None,
+            created_by=actor,
+        )
+        turn.full_clean()
+        normalized.append(turn)
+    if not normalized:
+        raise ValidationError("A scenario version needs at least one ordered turn.")
+    return normalized
+
+
+@transaction.atomic
+def create_conversation_scenario(
+    *, actor, stable_id, name, description="", lifecycle=ConversationScenario.Lifecycle.DRAFT,
+    domain=None, tags=(), definition="", turns=(), expected_session_behavior="shared-session-required"
+):
+    """Create a stable scenario plus its first immutable executable version."""
+
+    require_admin(actor)
+    companion = _validate_and_save(
+        Question(
+            stable_id=stable_id,
+            kind=Question.Kind.CONVERSATION,
+            lifecycle=lifecycle,
+            domain=domain,
+            rationale=description,
+            created_by=actor,
+            updated_by=actor,
+        )
+    )
+    companion.tags.set(tags)
+    companion_version = _create_question_version(
+        question=companion,
+        actor=actor,
+        version_number=1,
+        valid_from=timezone.now(),
+        question_text=name,
+        evaluation_guidance=definition,
+        change_type="",
+        change_reason="",
+        bindings=(),
+    )
+    scenario = _validate_and_save(
+        ConversationScenario(
+            stable_id=stable_id,
+            question=companion,
+            name=name,
+            description=description,
+            lifecycle=lifecycle,
+            domain=domain,
+            created_by=actor,
+            updated_by=actor,
+        )
+    )
+    scenario.tags.set(tags)
+    version = _validate_and_save(
+        ConversationScenarioVersion(
+            scenario=scenario,
+            version_number=1,
+            scenario_question_version=companion_version,
+            definition=definition,
+            expected_session_behavior=expected_session_behavior,
+            valid_from=timezone.now(),
+            created_by=actor,
+        )
+    )
+    ConversationTurn.objects.bulk_create(_scenario_turn_values(scenario_version=version, actor=actor, turns=turns))
+    return scenario
+
+
+@transaction.atomic
+def create_conversation_scenario_version(
+    *, actor, scenario, definition="", turns=(), expected_session_behavior="shared-session-required", effective_at=None
+):
+    """Close the current definition and add a complete immutable replacement."""
+
+    require_admin(actor)
+    locked_scenario = ConversationScenario.objects.select_for_update().get(pk=scenario.pk)
+    current = locked_scenario.versions.filter(valid_to__isnull=True).first()
+    transition_at = effective_at or timezone.now()
+    if current and transition_at <= current.valid_from:
+        raise ValidationError("A new scenario version must begin after the current version.")
+    next_number = (locked_scenario.versions.aggregate(maximum=Max("version_number"))["maximum"] or 0) + 1
+    if current:
+        ConversationScenarioVersion.objects.filter(pk=current.pk, valid_to__isnull=True).update(valid_to=transition_at)
+    companion_question = Question.objects.select_for_update().get(pk=locked_scenario.question_id)
+    current_question_version = companion_question.versions.filter(valid_to__isnull=True).first()
+    if current_question_version:
+        QuestionVersion.objects.filter(pk=current_question_version.pk, valid_to__isnull=True).update(valid_to=transition_at)
+    companion_version = _create_question_version(
+        question=companion_question,
+        actor=actor,
+        version_number=(companion_question.versions.aggregate(maximum=Max("version_number"))["maximum"] or 0) + 1,
+        valid_from=transition_at,
+        question_text=locked_scenario.name,
+        evaluation_guidance=definition,
+        change_type=QuestionVersion.ChangeType.DATA_MODEL_EVOLUTION,
+        change_reason="Conversation scenario definition changed.",
+        bindings=(),
+    )
+    version = _validate_and_save(
+        ConversationScenarioVersion(
+            scenario=locked_scenario,
+            version_number=next_number,
+            scenario_question_version=companion_version,
+            definition=definition,
+            expected_session_behavior=expected_session_behavior,
+            valid_from=transition_at,
+            created_by=actor,
+        )
+    )
+    ConversationTurn.objects.bulk_create(_scenario_turn_values(scenario_version=version, actor=actor, turns=turns))
+    ConversationScenario.objects.filter(pk=locked_scenario.pk).update(updated_by=actor)
+    return version
+
+
+@transaction.atomic
+def update_conversation_scenario_metadata(*, actor, scenario, name, description, lifecycle, domain, tags):
+    require_admin(actor)
+    locked = ConversationScenario.objects.select_for_update().get(pk=scenario.pk)
+    if lifecycle not in ConversationScenario.Lifecycle.values:
+        raise ValidationError({"lifecycle": "Unsupported scenario lifecycle."})
+    if lifecycle == ConversationScenario.Lifecycle.ACTIVE:
+        if domain is None:
+            raise ValidationError({"domain": "A domain is required before activation."})
+        if not locked.versions.filter(valid_to__isnull=True).exists():
+            raise ValidationError("A current ScenarioVersion is required before activation.")
+    locked.name = name
+    locked.description = description
+    locked.lifecycle = lifecycle
+    locked.domain = domain
+    locked.updated_by = actor
+    locked = _validate_and_save(locked)
+    locked.tags.set(tags)
+    Question.objects.filter(pk=locked.question_id).update(
+        lifecycle=lifecycle,
+        domain=domain,
+        rationale=description,
+        updated_by=actor,
+        updated_at=timezone.now(),
+    )
+    locked.question.tags.set(tags)
+    return locked
 
 
 @transaction.atomic

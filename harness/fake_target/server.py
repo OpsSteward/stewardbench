@@ -45,6 +45,9 @@ class FakeTargetState:
     )
     control_token: str = field(default_factory=lambda: secrets.token_urlsafe(24))
     journal: list[dict] = field(default_factory=list)
+    conversation_journal: list[dict] = field(default_factory=list)
+    sessions: dict[str, dict] = field(default_factory=dict)
+    next_session_number: int = 1
     active_requests: int = 0
     observed_max_concurrency: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -62,6 +65,9 @@ class FakeTargetState:
             for key, value in values.items():
                 if key in {
                     "journal",
+                    "conversation_journal",
+                    "sessions",
+                    "next_session_number",
                     "active_requests",
                     "observed_max_concurrency",
                     "_lock",
@@ -102,6 +108,9 @@ class FakeTargetState:
             if self.active_requests:
                 raise RuntimeError("Cannot reset a fake target with active requests.")
             self.journal.clear()
+            self.conversation_journal.clear()
+            self.sessions.clear()
+            self.next_session_number = 1
             self.observed_max_concurrency = 0
 
     def journal_snapshot(self):
@@ -112,10 +121,69 @@ class FakeTargetState:
                 counts[request_id] = counts.get(request_id, 0) + 1
             return {
                 "entries": list(self.journal),
+                "conversation_entries": list(self.conversation_journal),
                 "active_requests": self.active_requests,
                 "observed_max_concurrency": self.observed_max_concurrency,
                 "per_correlation_request_counts": counts,
             }
+
+    def open_session(self):
+        with self._lock:
+            session_id = f"S{self.next_session_number}"
+            self.next_session_number += 1
+            self.sessions[session_id] = {"next_turn": 1, "usable": True}
+            self.conversation_journal.append(
+                {"event": "open", "session_id": session_id, "sequence": len(self.conversation_journal) + 1, "at": _timestamp()}
+            )
+            return session_id
+
+    def accept_conversation_turn(self, *, session_id, declared_turn, request_id, concrete_question, body):
+        with self._lock:
+            session = self.sessions.get(session_id)
+            if not session or not session["usable"]:
+                return None, "UNUSABLE"
+            if declared_turn != session["next_turn"]:
+                return None, "OUT_OF_ORDER"
+        entry = self.accepted(
+            method="POST",
+            path=f"/conversations/{session_id}/turns",
+            request_id=request_id,
+            concrete_question=concrete_question,
+            body=body,
+        )
+        with self._lock:
+            entry["session_id"] = session_id
+            entry["turn_ordinal"] = declared_turn
+            self.sessions[session_id]["next_turn"] += 1
+            self.conversation_journal.append(
+                {
+                    "event": "turn",
+                    "session_id": session_id,
+                    "turn_ordinal": declared_turn,
+                    "request_id": request_id,
+                    "sequence": len(self.conversation_journal) + 1,
+                    "at": _timestamp(),
+                }
+            )
+        return entry, None
+
+    def lose_session(self, session_id):
+        with self._lock:
+            if session_id in self.sessions:
+                self.sessions[session_id]["usable"] = False
+                self.conversation_journal.append(
+                    {"event": "lost", "session_id": session_id, "sequence": len(self.conversation_journal) + 1, "at": _timestamp()}
+                )
+
+    def close_session(self, session_id):
+        with self._lock:
+            session = self.sessions.get(session_id)
+            if not session:
+                return False
+            self.conversation_journal.append(
+                {"event": "close", "session_id": session_id, "sequence": len(self.conversation_journal) + 1, "at": _timestamp()}
+            )
+            return True
 
     def accepted(self, *, method, path, request_id, concrete_question, body):
         with self._lock:
@@ -211,6 +279,10 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802 - stdlib hook
         if self.path == "/question":
             return self._question()
+        if self.path == "/conversations":
+            return self._conversation_open()
+        if self.path.startswith("/conversations/") and self.path.endswith("/turns"):
+            return self._conversation_turn()
         if self.path in {"/__control", "/__reset", "/__release"}:
             if not self._control_allowed():
                 return self._send(403, b'{"error":"forbidden"}')
@@ -228,6 +300,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(400, b'{"error":"invalid control payload"}')
             self.state.configure(**values)
             return self._send(200, b'{"status":"configured"}')
+        self._send(404, b'{"error":"not found"}')
+
+    def do_DELETE(self):  # noqa: N802 - stdlib hook
+        if self.path.startswith("/conversations/"):
+            return self._conversation_close()
         self._send(404, b'{"error":"not found"}')
 
     def _metadata(self):
@@ -304,6 +381,91 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(envelope, ensure_ascii=False).encode("utf-8"))
         finally:
             self.state.completed(entry)
+
+    def _conversation_open(self):
+        if self.state.mode == "conversation_unsupported":
+            return self._send(501, b'{"error":"conversation unsupported","session_continuity":"UNUSABLE"}')
+        session_id = self.state.open_session()
+        return self._send(
+            201,
+            json.dumps({"session_id": session_id, "metadata": {"fake_conversation": True}}, ensure_ascii=False).encode("utf-8"),
+        )
+
+    def _conversation_turn(self):
+        body, payload = self._read_json()
+        request_id = self.headers.get("X-StewardBench-Request-ID", "")
+        session_id = ""
+        concrete_question = None
+        turn_ordinal = None
+        if isinstance(payload, dict):
+            request_id = str(payload.get("request_id") or request_id)
+            session_id = str(payload.get("session_id") or "")
+            concrete_question = payload.get("question") if isinstance(payload.get("question"), str) else None
+            # StewardBench sends the order as a data field only; target-side
+            # order enforcement remains independent from DB order assertions.
+            turn_ordinal = payload.get("turn_ordinal")
+        try:
+            turn_ordinal = int(turn_ordinal)
+        except (TypeError, ValueError):
+            return self._send(400, b'{"error":"missing turn order","session_continuity":"UNUSABLE"}')
+        self.state.wait_before_acceptance()
+        entry, problem = self.state.accept_conversation_turn(
+            session_id=session_id,
+            declared_turn=turn_ordinal,
+            request_id=request_id,
+            concrete_question=concrete_question,
+            body=body,
+        )
+        if problem == "UNUSABLE":
+            return self._send(409, b'{"error":"session unavailable","session_continuity":"UNUSABLE"}')
+        if problem == "OUT_OF_ORDER":
+            return self._send(409, b'{"error":"turn order rejected","session_continuity":"UNUSABLE"}')
+        try:
+            self.state.wait_after_acceptance()
+            mode = entry["mode"]
+            if mode == "session_loss":
+                self.state.lose_session(session_id)
+                self.state.response_started(entry)
+                return self._send(409, b'{"error":"session lost","session_continuity":"UNUSABLE"}')
+            if mode == "recoverable_turn_error":
+                self.state.response_started(entry)
+                return self._send(503, b'{"error":"recoverable turn error","session_continuity":"USABLE"}')
+            if self.state.expected_credential is not None and self.headers.get("Authorization", "") != f"Bearer {self.state.expected_credential}":
+                self.state.response_started(entry)
+                return self._send(401, b'{"error":"unauthorized","session_continuity":"UNUSABLE"}')
+            if entry["response_delay_seconds"]:
+                time.sleep(entry["response_delay_seconds"])
+            self.state.response_started(entry)
+            if mode == "http_error":
+                return self._send(503, b'{"error":"scripted target error","session_continuity":"UNKNOWN"}')
+            if mode == "malformed_response":
+                return self._send(200, b"{not-json", "application/json")
+            answer = entry["answer"] if entry["answer"] is not None else self.state.answer
+            if mode == "unsafe_html":
+                answer = "<script>window.__fake_target_executed = true</script><b>unsafe</b>"
+            return self._send(
+                200,
+                json.dumps(
+                    {
+                        "complete": True,
+                        "answer": answer,
+                        "evidence": self.state.evidence,
+                        "correlation_id": request_id,
+                        "metadata": {"fake_mode": mode, "session_id": session_id},
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+            )
+        finally:
+            self.state.completed(entry)
+
+    def _conversation_close(self):
+        session_id = self.path.split("/")[2] if len(self.path.split("/")) > 2 else ""
+        if self.state.mode == "close_failure":
+            return self._send(503, b'{"error":"close failed","session_continuity":"USABLE"}')
+        if not self.state.close_session(session_id):
+            return self._send(404, b'{"error":"session unavailable","session_continuity":"UNUSABLE"}')
+        return self._send(204, b"")
 
 
 class FakeTargetServer:

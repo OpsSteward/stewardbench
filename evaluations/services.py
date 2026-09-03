@@ -25,9 +25,9 @@ from django.db.models import Count, Q, Subquery
 from django.utils import timezone
 
 from accounts.policy import require_admin
-from catalog.models import EvaluationTarget, Question, TargetRevision
+from catalog.models import ConversationScenario, ConversationScenarioVersion, EvaluationTarget, Question, TargetRevision
 
-from .adapters import AdapterFailure, TargetTimeout, adapter_for, resolve_credential
+from .adapters import AdapterFailure, ConversationFailure, TargetTimeout, adapter_for, resolve_credential
 from .models import (
     Baseline,
     BaselineAttentionEvent,
@@ -37,6 +37,7 @@ from .models import (
     Comment,
     Comparison,
     ComparisonItem,
+    ConversationAttempt,
     EvaluationRun,
     Execution,
     ExecutionValidityDecision,
@@ -134,6 +135,23 @@ def _freeze_bindings(question_version):
     return concrete_question, frozen_bindings, errors
 
 
+def _freeze_conversation_turn(turn):
+    """Freeze a scenario turn's exact prompt and static non-secret bindings."""
+
+    concrete_question = turn.prompt_template
+    frozen_bindings = []
+    errors = []
+    for name, value in sorted((turn.static_bindings or {}).items()):
+        marker = "{{" + name + "}}"
+        if marker not in concrete_question:
+            errors.append(f"Static binding {name!r} requires the exact {marker} placeholder in the turn prompt.")
+            continue
+        rendered = _display_binding_value(value)
+        concrete_question = concrete_question.replace(marker, rendered)
+        frozen_bindings.append({"name": name, "value": value, "display_value": rendered})
+    return concrete_question, frozen_bindings, errors
+
+
 def _target_snapshot_values(target: EvaluationTarget, revision: TargetRevision):
     return {
         "target": target,
@@ -148,6 +166,186 @@ def _target_snapshot_values(target: EvaluationTarget, revision: TargetRevision):
         "classification": revision.classification,
         "supports_runtime_metadata": revision.supports_runtime_metadata,
     }
+
+
+def _conversation_execution_values(*, run, target_revision, target_snapshot, build_snapshot, attempt, turn, order, baseline_execution=None):
+    """Build one immutable turn manifest.
+
+    A controlled replay copies the original submitted prompt and resolved
+    binding evidence.  Matching a ScenarioVersion is necessary but not
+    sufficient: this retains the precise frozen input actually submitted to
+    the baseline target even if future data repairs expose an inconsistency.
+    """
+    if baseline_execution is not None:
+        return (
+            Execution(
+                run=run,
+                question=baseline_execution.question,
+                question_version=baseline_execution.question_version,
+                conversation_attempt=attempt,
+                conversation_turn=turn,
+                target_revision=target_revision,
+                target_snapshot=target_snapshot,
+                build_snapshot=build_snapshot,
+                baseline_execution=baseline_execution,
+                question_order=order,
+                question_stable_id=baseline_execution.question_stable_id,
+                question_version_number=baseline_execution.question_version_number,
+                question_template=baseline_execution.question_template,
+                submitted_question=baseline_execution.submitted_question,
+                adapter_key=target_revision.adapter_key,
+                adapter_version=target_revision.adapter_version,
+                normalizer_key=baseline_execution.normalizer_key,
+                normalizer_version=baseline_execution.normalizer_version,
+                preflight_error_class=baseline_execution.preflight_error_class,
+                preflight_error_detail=baseline_execution.preflight_error_detail,
+                comparison_non_comparable_reason=baseline_execution.comparison_non_comparable_reason,
+            ),
+            [
+                {
+                    "name": binding.name,
+                    "value": binding.value,
+                    "display_value": binding.display_value,
+                }
+                for binding in baseline_execution.resolved_bindings.all().order_by("name")
+            ],
+        )
+    concrete_question, bindings, binding_errors = _freeze_conversation_turn(turn)
+    canonical_version = turn.canonical_question_version
+    return (
+        Execution(
+            run=run,
+            question=turn.canonical_question,
+            question_version=canonical_version,
+            conversation_attempt=attempt,
+            conversation_turn=turn,
+            target_revision=target_revision,
+            target_snapshot=target_snapshot,
+            build_snapshot=build_snapshot,
+            baseline_execution=baseline_execution,
+            question_order=order,
+            question_stable_id=(turn.canonical_question.stable_id if turn.canonical_question_id else turn.stable_turn_id),
+            question_version_number=(canonical_version.version_number if canonical_version else 0),
+            question_template=turn.prompt_template,
+            submitted_question=concrete_question,
+            adapter_key=target_revision.adapter_key,
+            adapter_version=target_revision.adapter_version,
+            preflight_error_class="BINDING_CONFIGURATION_ERROR" if binding_errors else "",
+            preflight_error_detail=" ".join(binding_errors),
+        ),
+        bindings,
+    )
+
+
+def _create_conversation_run(
+    *, actor, target, revision, scenario_version, source_run=None, source_attempt=None,
+    baseline=None, baseline_attempt=None, baseline_executions=None, retry_request_key=None
+):
+    """Persist a complete sequential scenario manifest and one empty session attempt."""
+
+    turns = list(scenario_version.turns.select_related("canonical_question", "canonical_question_version").order_by("ordinal"))
+    if not turns:
+        raise ValidationError("The selected ScenarioVersion has no ordered turns.")
+    run = EvaluationRun.objects.create(
+        target=target,
+        target_revision=revision,
+        launched_by=actor,
+        requested_mode=EvaluationRun.ExecutionMode.SEQUENTIAL,
+        configured_max_concurrency=revision.max_concurrency,
+        actual_concurrency=1,
+        question_timeout_seconds=revision.question_timeout_seconds,
+        inter_question_delay_seconds=revision.inter_question_delay_seconds,
+        total_planned=len(turns),
+        selection_filter={
+            "conversation_scenario_id": scenario_version.scenario.stable_id,
+            "conversation_scenario_version": scenario_version.version_number,
+            "shared_session_required": True,
+            **({"controlled_baseline_id": str(baseline.pk), "frozen_baseline_inputs": True} if baseline else {}),
+        },
+        source_run=source_run,
+        comparison_baseline=baseline,
+        retry_request_key=retry_request_key,
+    )
+    target_snapshot = TargetSnapshot.objects.create(run=run, **_target_snapshot_values(target, revision))
+    build_snapshot = BuildSnapshot.objects.create(
+        run=run,
+        declared_product_version=revision.declared_product_version,
+        declared_build_id=revision.declared_build_id,
+        declared_git_sha=revision.declared_git_sha,
+    )
+    attempt = ConversationAttempt.objects.create(
+        run=run,
+        scenario_version=scenario_version,
+        source_attempt=source_attempt,
+        baseline_attempt=baseline_attempt,
+    )
+    baseline_executions = baseline_executions or {}
+    executions = []
+    all_bindings = []
+    for order, turn in enumerate(turns, start=1):
+        execution, bindings = _conversation_execution_values(
+            run=run,
+            target_revision=revision,
+            target_snapshot=target_snapshot,
+            build_snapshot=build_snapshot,
+            attempt=attempt,
+            turn=turn,
+            order=order,
+            baseline_execution=baseline_executions.get(turn.pk),
+        )
+        executions.append(execution)
+        all_bindings.append(bindings)
+    created = Execution.objects.bulk_create(executions)
+    binding_rows = []
+    for execution, bindings in zip(created, all_bindings, strict=True):
+        binding_rows.extend(
+            ResolvedBinding(
+                execution=execution,
+                name=binding["name"],
+                resolution_mode=(
+                    ResolvedBinding.ResolutionMode.BASELINE_FROZEN if baseline else ResolvedBinding.ResolutionMode.FIXED_ADMIN
+                ),
+                value=binding["value"],
+                display_value=binding["display_value"],
+            )
+            for binding in bindings
+        )
+    ResolvedBinding.objects.bulk_create(binding_rows)
+    if baseline:
+        Comparison.objects.create(
+            baseline=baseline,
+            current_run=run,
+            algorithm_key="exact",
+            algorithm_version="exact-v1",
+        )
+    return run
+
+
+@transaction.atomic
+def launch_conversation_scenario(*, actor, scenario: ConversationScenario, target: EvaluationTarget):
+    """Launch one current ACTIVE scenario against a conversation-capable target."""
+
+    require_admin(actor)
+    locked_scenario = ConversationScenario.objects.select_for_update().get(pk=scenario.pk)
+    if locked_scenario.lifecycle != ConversationScenario.Lifecycle.ACTIVE:
+        raise ValidationError("Only ACTIVE conversation scenarios can be launched.")
+    scenario_version = locked_scenario.versions.filter(valid_to__isnull=True).first()
+    if not scenario_version:
+        raise ValidationError("The selected conversation scenario has no current version.")
+    locked_target = EvaluationTarget.objects.select_for_update().select_related("product", "environment").get(pk=target.pk)
+    revision = locked_target.revisions.filter(valid_to__isnull=True).first()
+    if not locked_target.is_active or not revision:
+        raise ValidationError("The selected target has no active current revision.")
+    if not revision.supports_question_api or not revision.supports_conversation_session:
+        raise ValidationError(
+            "The selected target revision lacks CONVERSATION_SESSION capability; no independent one-shot substitute was launched."
+        )
+    return _create_conversation_run(
+        actor=actor,
+        target=locked_target,
+        revision=revision,
+        scenario_version=scenario_version,
+    )
 
 
 @transaction.atomic
@@ -432,6 +630,12 @@ def launch_controlled_comparison(*, actor, baseline: Baseline, target: Evaluatio
     )
     if not locked_baseline.is_active:
         raise ValidationError("Only an ACTIVE Baseline may launch a controlled comparison.")
+    if ConversationAttempt.objects.filter(run=locked_baseline.source_run).exists():
+        return launch_controlled_conversation_comparison(
+            actor=actor,
+            baseline=locked_baseline,
+            target=target,
+        )
     locked_target = EvaluationTarget.objects.select_for_update().select_related(
         "product", "environment"
     ).get(pk=target.pk)
@@ -567,6 +771,28 @@ def _comparison_non_comparable_reason(baseline_execution: Execution, current_exe
             "CURRENT_NO_USABLE_ANSWER",
             "The current observation has no usable SUCCESS answer for answer-change comparison.",
         )
+    if baseline_execution.conversation_turn_id or current_execution.conversation_turn_id:
+        if not baseline_execution.conversation_turn_id or not current_execution.conversation_turn_id:
+            return ("CONVERSATION_TURN_MISMATCH", "Only one observation belongs to a conversation turn.")
+        if baseline_execution.conversation_turn_id != current_execution.conversation_turn_id:
+            return ("CONVERSATION_TURN_MISMATCH", "The exact version-bound conversation turn differs.")
+        if (
+            not baseline_execution.conversation_attempt_id
+            or not current_execution.conversation_attempt_id
+            or baseline_execution.conversation_attempt.scenario_version_id
+            != current_execution.conversation_attempt.scenario_version_id
+        ):
+            return ("SCENARIO_VERSION_MISMATCH", "The observations do not use the exact same ScenarioVersion.")
+        if current_execution.conversation_attempt.baseline_attempt_id != baseline_execution.conversation_attempt_id:
+            return (
+                "BASELINE_CONVERSATION_ATTEMPT_MISMATCH",
+                "The current turn was not launched from the immutable baseline ConversationAttempt.",
+            )
+        if baseline_execution.submitted_question != current_execution.submitted_question:
+            return ("CONCRETE_QUESTION_MISMATCH", "The exact concrete submitted question differs.")
+        if _canonical_binding_signature(baseline_execution) != _canonical_binding_signature(current_execution):
+            return ("FROZEN_BINDING_MISMATCH", "The exact frozen binding values differ.")
+        return None
     if baseline_execution.question_id != current_execution.question_id:
         return ("QUESTION_IDENTITY_MISMATCH", "The stable Question identity differs.")
     if baseline_execution.question_version_id != current_execution.question_version_id:
@@ -596,7 +822,7 @@ def record_exact_comparison(*, current_execution: Execution):
         return None
     current_review = HumanReview.objects.filter(pk=current.current_human_review_id).first()
     baseline_execution = (
-        Execution.objects.select_related("current_human_review", "question_version")
+        Execution.objects.select_related("current_human_review", "question_version", "conversation_attempt")
         .prefetch_related("resolved_bindings")
         .get(pk=current.baseline_execution_id)
     )
@@ -1233,6 +1459,10 @@ def retry_execution(*, actor, execution: Execution, retry_request_key: uuid.UUID
     """Create, but never append to, a deliberate new one-execution retry Run."""
 
     require_admin(actor)
+    if execution.conversation_attempt_id:
+        raise ValidationError(
+            "A dependent conversation turn cannot be retried independently; retry the complete conversation from turn 1."
+        )
     key = None
     if retry_request_key:
         try:
@@ -1245,7 +1475,10 @@ def retry_execution(*, actor, execution: Execution, retry_request_key: uuid.UUID
     try:
         with transaction.atomic():
             source = (
-                Execution.objects.select_for_update()
+                # Question and QuestionVersion are nullable for contextual
+                # conversation turns.  Lock the immutable source Execution,
+                # not nullable joined evidence relations.
+                Execution.objects.select_for_update(of=("self",))
                 .select_related("run", "target_snapshot", "build_snapshot", "question", "question_version")
                 .prefetch_related("resolved_bindings")
                 .get(pk=execution.pk)
@@ -1256,6 +1489,91 @@ def retry_execution(*, actor, execution: Execution, retry_request_key: uuid.UUID
         if key:
             return EvaluationRun.objects.get(retry_request_key=key)
         raise
+
+
+@transaction.atomic
+def retry_conversation_attempt(*, actor, attempt: ConversationAttempt, retry_request_key: uuid.UUID | str | None = None):
+    """Retry a whole historical conversation in a new Run and fresh target session."""
+
+    require_admin(actor)
+    key = None
+    if retry_request_key:
+        try:
+            key = uuid.UUID(str(retry_request_key))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("The conversation retry request key is invalid.") from exc
+        existing = EvaluationRun.objects.filter(retry_request_key=key).first()
+        if existing:
+            return existing
+    locked = (
+        ConversationAttempt.objects.select_for_update()
+        .select_related("run", "scenario_version", "run__target", "run__target_revision")
+        .get(pk=attempt.pk)
+    )
+    if not locked.run.is_terminal:
+        raise ValidationError("Only a completed conversation Run can be retried.")
+    revision = locked.run.target.revisions.filter(valid_to__isnull=True).first()
+    if not revision or not revision.supports_question_api or not revision.supports_conversation_session:
+        raise ValidationError("The current target does not support the conversation session API required for retry.")
+    try:
+        # Keep the uniqueness race in a savepoint.  Otherwise an IntegrityError
+        # would poison this outer transaction before the idempotent lookup.
+        with transaction.atomic():
+            return _create_conversation_run(
+                actor=actor,
+                target=locked.run.target,
+                revision=revision,
+                scenario_version=locked.scenario_version,
+                source_run=locked.run,
+                source_attempt=locked,
+                retry_request_key=key,
+            )
+    except IntegrityError:
+        if key:
+            return EvaluationRun.objects.get(retry_request_key=key)
+        raise
+
+
+@transaction.atomic
+def launch_controlled_conversation_comparison(*, actor, baseline: Baseline, target: EvaluationTarget):
+    """Replay one baseline scenario version from turn 1 in a fresh session."""
+
+    require_admin(actor)
+    locked_baseline = Baseline.objects.select_for_update().select_related("source_run", "source_target").get(pk=baseline.pk)
+    if not locked_baseline.is_active:
+        raise ValidationError("Only an ACTIVE Baseline may launch a controlled comparison.")
+    source_attempt = ConversationAttempt.objects.select_related("scenario_version").filter(run=locked_baseline.source_run).first()
+    members = list(
+        locked_baseline.memberships.select_related("execution", "execution__conversation_turn").order_by("execution__question_order")
+    )
+    if not source_attempt or not members or any(member.execution.conversation_attempt_id != source_attempt.pk for member in members):
+        raise ValidationError("A controlled conversation comparison requires one complete historical ConversationAttempt.")
+    turns = list(source_attempt.scenario_version.turns.order_by("ordinal"))
+    if len(turns) != len(members):
+        raise ValidationError("The baseline conversation membership is incomplete and cannot be replayed safely.")
+    baseline_executions = {member.execution.conversation_turn_id: member.execution for member in members}
+    if set(baseline_executions) != {turn.pk for turn in turns}:
+        raise ValidationError("The baseline conversation turns do not exactly match its ScenarioVersion.")
+    locked_target = EvaluationTarget.objects.select_for_update().select_related("product", "environment").get(pk=target.pk)
+    if not locked_target.is_active:
+        raise ValidationError("The selected current target is inactive.")
+    if (
+        locked_target.product_id != locked_baseline.source_target.product_id
+        or locked_target.environment_id != locked_baseline.source_target.environment_id
+    ):
+        raise ValidationError("A controlled comparison target must use the baseline Product and Environment context.")
+    revision = locked_target.revisions.filter(valid_to__isnull=True).first()
+    if not revision or not revision.supports_question_api or not revision.supports_conversation_session:
+        raise ValidationError("The selected target has no compatible current conversation session API revision.")
+    return _create_conversation_run(
+        actor=actor,
+        target=locked_target,
+        revision=revision,
+        scenario_version=source_attempt.scenario_version,
+        baseline=locked_baseline,
+        baseline_attempt=source_attempt,
+        baseline_executions=baseline_executions,
+    )
 
 
 @transaction.atomic
@@ -1277,6 +1595,8 @@ def rerun_source_run(
     locked_run = EvaluationRun.objects.select_for_update().get(pk=source_run.pk)
     if not locked_run.is_terminal:
         raise ValidationError("Only a completed Run can be rerun.")
+    if hasattr(locked_run, "conversation_attempt"):
+        raise ValidationError("Conversation scenarios are retried as a complete conversation from turn 1.")
     source_executions = locked_run.executions.order_by("question_order")
     if source_execution_ids is not None:
         requested = {int(value) for value in source_execution_ids}
@@ -1403,8 +1723,22 @@ def reconcile_stale_claims():
                 ),
             },
         )
+        if execution.conversation_attempt_id:
+            # A worker that died after the durable submission boundary cannot
+            # establish whether the target session remains a trustworthy
+            # continuation point.  Do not submit later dependent turns or
+            # silently create a replacement session.
+            _mark_conversation_session_unusable(
+                execution_id=execution.pk,
+                error_class="AMBIGUOUS_INFRASTRUCTURE",
+                detail=(
+                    "Worker ownership became stale after target submission may have started; "
+                    "shared-session continuity is unknown."
+                ),
+            )
+        else:
+            finalized_runs.add(execution.run_id)
         ambiguous += 1
-        finalized_runs.add(execution.run_id)
     for run_id in finalized_runs:
         run = EvaluationRun.objects.select_for_update().get(pk=run_id)
         _finalize_run_if_complete(run, now)
@@ -1427,8 +1761,14 @@ def claim_next_execution(worker_id: str | None = None):
         raise ValueError("A worker identity is required to claim execution work.")
     now = _database_now()
     candidates = list(
-        Execution.objects.select_for_update(skip_locked=True)
-        .select_related("run")
+        # Conversation relationships are intentionally nullable so M3--M7
+        # one-question executions retain their historical shape. PostgreSQL
+        # cannot lock the nullable side of the LEFT JOIN introduced by
+        # select_related below, so lock only the durable Execution work row.
+        # The Run, ConversationAttempt, and TargetRevision are each locked
+        # explicitly before their mutable dispatch state is inspected.
+        Execution.objects.select_for_update(of=("self",), skip_locked=True)
+        .select_related("run", "conversation_attempt", "conversation_turn")
         .filter(
             outcome=Execution.Outcome.PENDING,
             run__state__in=(EvaluationRun.State.PENDING, EvaluationRun.State.RUNNING),
@@ -1440,6 +1780,19 @@ def claim_next_execution(worker_id: str | None = None):
         run = EvaluationRun.objects.select_for_update().get(pk=execution.run_id)
         if run.is_terminal or (run.next_dispatch_at and run.next_dispatch_at > now):
             continue
+        if execution.conversation_attempt_id:
+            attempt = ConversationAttempt.objects.select_for_update().get(pk=execution.conversation_attempt_id)
+            if attempt.session_state == ConversationAttempt.SessionState.UNUSABLE:
+                # A terminal blocker is created when continuity becomes
+                # unusable.  This guard protects a concurrent/stale picker
+                # from ever treating a dependent turn as an independent call.
+                continue
+            prior_is_active = Execution.objects.filter(
+                conversation_attempt_id=attempt.pk,
+                conversation_turn__ordinal__lt=execution.conversation_turn.ordinal,
+            ).exclude(outcome__in=(Execution.Outcome.SUCCESS, Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT)).exists()
+            if prior_is_active:
+                continue
         # This immutable row is the durable target-wide capacity mutex. It is
         # held only while counting and recording a claim, never during I/O.
         TargetRevision.objects.select_for_update().get(pk=execution.target_revision_id)
@@ -1623,6 +1976,244 @@ def _worker_test_hook(execution_id: int, phase: str):
         time.sleep(0.02)
 
 
+def _ensure_conversation_session(execution: Execution, adapter, credential: str | None):
+    """Open the one durable target session before the first turn only.
+
+    The claim is already marked ``SUBMISSION_STARTED`` before this function is
+    called.  If a worker dies during session creation, M4 recovery therefore
+    records ambiguity rather than silently opening another session.
+    """
+
+    attempt = ConversationAttempt.objects.get(pk=execution.conversation_attempt_id)
+    if attempt.session_state == ConversationAttempt.SessionState.UNUSABLE:
+        raise ConversationFailure("SESSION_FAILED", "The historical conversation session is unusable.", continuity="UNUSABLE")
+    if attempt.target_session_id:
+        return attempt
+    if execution.conversation_turn.ordinal != 1:
+        raise ConversationFailure(
+            "SESSION_FAILED",
+            "A later conversation turn has no persisted shared session identity.",
+            continuity="UNUSABLE",
+        )
+    session = adapter.open_conversation(
+        endpoint=execution.target_snapshot.endpoint,
+        credential=credential,
+        timeout_seconds=execution.run.question_timeout_seconds,
+    )
+    with transaction.atomic():
+        locked = ConversationAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if locked.target_session_id and locked.target_session_id != session.session_id:
+            raise ConversationFailure(
+                "SESSION_FAILED",
+                "A different target session was returned after a historical session identity was recorded.",
+                continuity="UNUSABLE",
+            )
+        if not locked.target_session_id:
+            locked.target_session_id = session.session_id
+            locked.session_metadata = {
+                "open_request": session.raw_request,
+                "open_response": session.raw_response,
+                "target_metadata": session.session_metadata,
+            }
+            locked.session_state = ConversationAttempt.SessionState.ACTIVE
+            locked.started_at = timezone.now()
+            locked.save(update_fields=("target_session_id", "session_metadata", "session_state", "started_at"))
+        return locked
+
+
+@transaction.atomic
+def _mark_conversation_session_unusable(*, execution_id: int, error_class: str, detail: str):
+    """Block never-submitted dependent turns without inventing new sessions."""
+
+    execution = Execution.objects.select_for_update().get(pk=execution_id)
+    attempt = ConversationAttempt.objects.select_for_update().get(pk=execution.conversation_attempt_id)
+    now = _database_now()
+    attempt.session_state = ConversationAttempt.SessionState.UNUSABLE
+    attempt.session_diagnostic = detail
+    attempt.save(update_fields=("session_state", "session_diagnostic"))
+    blocked = Execution.objects.select_for_update().filter(
+        conversation_attempt=attempt,
+        outcome=Execution.Outcome.PENDING,
+    )
+    for dependent in blocked:
+        _finalize_locked_execution(
+            dependent,
+            outcome=Execution.Outcome.ERROR,
+            now=now,
+            values={
+                "error_class": "SESSION_CONTINUITY_BLOCKED",
+                "error_detail": (
+                    "This dependent conversation turn was not submitted because the shared target session "
+                    f"became unusable after {error_class}: {detail}"
+                )[:2000],
+            },
+        )
+    if not attempt.turn_executions.exclude(
+        outcome__in=(Execution.Outcome.SUCCESS, Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT)
+    ).exists():
+        attempt.completed_at = now
+        attempt.save(update_fields=("completed_at",))
+    run = EvaluationRun.objects.select_for_update().get(pk=execution.run_id)
+    _finalize_run_if_complete(run, now)
+
+
+def _close_conversation_if_complete(execution_id: int):
+    """Close only after every turn reaches a terminal observation.
+
+    Closing is adapter cleanup, not an Execution rewrite; a close error is
+    retained as attempt diagnostic and does not alter per-turn evidence.
+    """
+
+    execution = Execution.objects.select_related("conversation_attempt", "run", "target_snapshot").get(pk=execution_id)
+    if not execution.conversation_attempt_id:
+        return
+    attempt = execution.conversation_attempt
+    if attempt.completed_at or attempt.session_state == ConversationAttempt.SessionState.UNUSABLE:
+        return
+    if attempt.turn_executions.exclude(
+        outcome__in=(Execution.Outcome.SUCCESS, Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT)
+    ).exists():
+        return
+    if not attempt.target_session_id:
+        return
+    diagnostic = ""
+    closed = True
+    try:
+        adapter = adapter_for(execution.adapter_key)
+        credential = resolve_credential(execution.target_snapshot.credential_reference)
+        adapter.close_conversation(
+            endpoint=execution.target_snapshot.endpoint,
+            credential=credential,
+            session_id=attempt.target_session_id,
+            timeout_seconds=execution.run.question_timeout_seconds,
+        )
+    except ConversationFailure as failure:
+        closed = False
+        diagnostic = f"Session close diagnostic: {failure.error_class}: {failure.detail}"
+    except Exception:
+        closed = False
+        diagnostic = "Session close diagnostic: adapter cleanup failed unexpectedly."
+    with transaction.atomic():
+        locked = ConversationAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if locked.completed_at:
+            return
+        locked.completed_at = timezone.now()
+        if closed:
+            locked.session_state = ConversationAttempt.SessionState.CLOSED
+            locked.save(update_fields=("completed_at", "session_state"))
+        else:
+            locked.session_diagnostic = diagnostic
+            locked.save(update_fields=("completed_at", "session_diagnostic"))
+
+
+def _conversation_finish(claim: ExecutionClaim, *, outcome, values, continuity="USABLE"):
+    completed = _complete_execution(claim, outcome=outcome, values=values)
+    if continuity != "USABLE":
+        _mark_conversation_session_unusable(
+            execution_id=claim.execution_id,
+            error_class=values.get("error_class", "SESSION_FAILED"),
+            detail=values.get("error_detail", "Conversation continuity could not be established."),
+        )
+    _close_conversation_if_complete(claim.execution_id)
+    return completed
+
+
+def _process_conversation_claim(claim: ExecutionClaim, execution: Execution):
+    """Run one ordered session-bound turn under the normal M4 claim lease."""
+
+    with _ClaimHeartbeat(claim):
+        if execution.preflight_error_class:
+            return _conversation_finish(
+                claim,
+                outcome=Execution.Outcome.ERROR,
+                values={"error_class": execution.preflight_error_class, "error_detail": execution.preflight_error_detail},
+                continuity="UNUSABLE",
+            )
+        try:
+            adapter = adapter_for(execution.adapter_key)
+            credential = resolve_credential(execution.target_snapshot.credential_reference)
+            _record_runtime_metadata(execution, adapter, credential)
+            _worker_test_hook(execution.pk, "pre_submit")
+            if not _mark_submission_started(claim):
+                return False
+            attempt = _ensure_conversation_session(execution, adapter, credential)
+            submission = adapter.submit_conversation_turn(
+                endpoint=execution.target_snapshot.endpoint,
+                credential=credential,
+                request_id=str(execution.request_correlation_id),
+                session_id=attempt.target_session_id,
+                turn_ordinal=execution.conversation_turn.ordinal,
+                question=execution.submitted_question,
+                timeout_seconds=execution.run.question_timeout_seconds,
+            )
+            _worker_test_hook(execution.pk, "post_response")
+        except ConversationFailure as failure:
+            outcome = Execution.Outcome.TIMEOUT if failure.error_class == "TARGET_TIMEOUT" else Execution.Outcome.ERROR
+            return _conversation_finish(
+                claim,
+                outcome=outcome,
+                values={
+                    "protocol_status": failure.protocol_status,
+                    "raw_request": failure.raw_request,
+                    "raw_response": failure.raw_response,
+                    "error_class": failure.error_class,
+                    "error_detail": failure.detail,
+                },
+                continuity=failure.continuity,
+            )
+        except TargetTimeout as failure:
+            return _conversation_finish(
+                claim,
+                outcome=Execution.Outcome.TIMEOUT,
+                values={
+                    "protocol_status": failure.protocol_status,
+                    "raw_request": failure.raw_request,
+                    "raw_response": failure.raw_response,
+                    "error_class": failure.error_class,
+                    "error_detail": failure.detail,
+                },
+                continuity="UNKNOWN",
+            )
+        except AdapterFailure as failure:
+            return _conversation_finish(
+                claim,
+                outcome=Execution.Outcome.ERROR,
+                values={
+                    "protocol_status": failure.protocol_status,
+                    "raw_request": failure.raw_request,
+                    "raw_response": failure.raw_response,
+                    "error_class": failure.error_class,
+                    "error_detail": failure.detail,
+                },
+                continuity="UNKNOWN",
+            )
+        except Exception:
+            logger.error("unexpected conversation adapter failure execution_id=%s", execution.pk)
+            return _conversation_finish(
+                claim,
+                outcome=Execution.Outcome.ERROR,
+                values={"error_class": "ADAPTER_ERROR", "error_detail": "Unexpected adapter failure; no target answer was captured."},
+                continuity="UNKNOWN",
+            )
+        return _conversation_finish(
+            claim,
+            outcome=Execution.Outcome.SUCCESS,
+            values={
+                "protocol_status": submission.protocol_status,
+                "raw_request": submission.raw_request,
+                "raw_response": submission.raw_response,
+                "raw_answer": submission.raw_answer,
+                "display_answer": submission.raw_answer,
+                "evidence": submission.evidence if submission.evidence is not None else {},
+                "response_metadata": submission.response_metadata,
+                "target_correlation_id": submission.target_correlation_id,
+                "adapter_key": submission.adapter_key,
+                "adapter_version": submission.adapter_version,
+                "completed_at": submission.completed_at,
+            },
+        )
+
+
 def process_claim(claim: ExecutionClaim):
     """Perform one claimed execution, with all remote calls outside DB locks."""
 
@@ -1635,6 +2226,9 @@ def process_claim(claim: ExecutionClaim):
         or execution.claim_token != claim.token
     ):
         return False
+
+    if execution.conversation_attempt_id:
+        return _process_conversation_claim(claim, execution)
 
     with _ClaimHeartbeat(claim):
         if execution.preflight_error_class:

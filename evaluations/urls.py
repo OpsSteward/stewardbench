@@ -22,6 +22,11 @@ urlpatterns = [
     path("runs/", views.run_list, name="run-list"),
     path("runs/launch/", views.launch_run_view, name="run-launch"),
     path("runs/launch/question/<int:question_id>/", views.launch_one_question_view, name="run-launch-one"),
+    path(
+        "conversation-scenarios/<str:stable_id>/launch/",
+        views.launch_conversation_scenario_view,
+        name="conversation-scenario-launch",
+    ),
     path("runs/<uuid:run_id>/", views.run_detail, name="run-detail"),
     path("runs/<uuid:run_id>/progress/", views.run_progress_view, name="run-progress"),
     path("runs/<uuid:run_id>/comments/", views.run_comment_view, name="run-comment"),
@@ -33,4 +38,9 @@ urlpatterns = [
     path("executions/<int:execution_id>/comments/", views.execution_comment_view, name="execution-comment"),
     path("executions/<int:execution_id>/validity/", views.execution_validity_view, name="execution-validity"),
     path("executions/<int:execution_id>/retry/", views.retry_execution_view, name="execution-retry"),
+    path(
+        "conversation-attempts/<int:attempt_id>/retry/",
+        views.retry_conversation_attempt_view,
+        name="conversation-attempt-retry",
+    ),
 ]

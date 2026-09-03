@@ -5,7 +5,14 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
-from catalog.models import EvaluationTarget, Question, QuestionVersion, TargetRevision
+from catalog.models import (
+    ConversationScenarioVersion,
+    ConversationTurn,
+    EvaluationTarget,
+    Question,
+    QuestionVersion,
+    TargetRevision,
+)
 
 
 class EvaluationRun(models.Model):
@@ -205,6 +212,78 @@ class BuildSnapshot(models.Model):
         return super().save(*args, **kwargs)
 
 
+class ConversationAttempt(models.Model):
+    """Durable ownership of one target conversation session for a full scenario run."""
+
+    class SessionState(models.TextChoices):
+        PENDING = "PENDING", "Pending session"
+        ACTIVE = "ACTIVE", "Active"
+        UNUSABLE = "UNUSABLE", "Session unusable"
+        CLOSED = "CLOSED", "Closed"
+
+    run = models.OneToOneField(EvaluationRun, on_delete=models.PROTECT, related_name="conversation_attempt")
+    scenario_version = models.ForeignKey(
+        ConversationScenarioVersion,
+        on_delete=models.PROTECT,
+        related_name="attempts",
+    )
+    source_attempt = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="retry_attempts",
+    )
+    baseline_attempt = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="controlled_replay_attempts",
+    )
+    target_session_id = models.CharField(max_length=200, blank=True)
+    session_metadata = models.JSONField(default=dict, blank=True)
+    session_state = models.CharField(max_length=12, choices=SessionState.choices, default=SessionState.PENDING)
+    session_diagnostic = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-run__created_at",)
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(session_state__in=("PENDING", "ACTIVE", "UNUSABLE", "CLOSED")),
+                name="evaluations_conversation_session_state",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.scenario_version} attempt {self.pk}"
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            previous = type(self).objects.filter(pk=self.pk).values("target_session_id").first()
+            if previous and previous["target_session_id"] and previous["target_session_id"] != self.target_session_id:
+                raise ValidationError("A historical target session identity cannot be replaced.")
+        return super().save(*args, **kwargs)
+
+    @property
+    def overall_human_result(self):
+        """Derived result; it is intentionally not a separate editable judgment."""
+
+        required = self.turn_executions.filter(conversation_turn__required_for_overall=True)
+        # Human BAD is authoritative whenever present.  A transport failure is
+        # still visible on its turn and prevents GOOD, but must not erase an
+        # already recorded required-turn BAD from the derived human result.
+        if required.filter(current_human_review__judgment=HumanReview.Judgment.BAD).exists():
+            return "BAD"
+        if required.filter(outcome__in=(Execution.Outcome.PENDING, Execution.Outcome.RUNNING, Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT)).exists():
+            return "EXECUTION_INCOMPLETE"
+        if required.exists() and required.filter(current_human_review__judgment=HumanReview.Judgment.GOOD).count() == required.count():
+            return "GOOD"
+        return "NOT_FULLY_REVIEWED"
+
+
 class Execution(models.Model):
     class Outcome(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -237,9 +316,31 @@ class Execution(models.Model):
         INVALID = "INVALID", "Invalid"
 
     run = models.ForeignKey(EvaluationRun, on_delete=models.PROTECT, related_name="executions")
-    question = models.ForeignKey(Question, on_delete=models.PROTECT, related_name="executions")
+    question = models.ForeignKey(
+        Question,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="executions",
+    )
     question_version = models.ForeignKey(
         QuestionVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="executions",
+    )
+    conversation_attempt = models.ForeignKey(
+        ConversationAttempt,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="turn_executions",
+    )
+    conversation_turn = models.ForeignKey(
+        ConversationTurn,
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="executions",
     )
@@ -248,7 +349,7 @@ class Execution(models.Model):
     build_snapshot = models.ForeignKey(BuildSnapshot, on_delete=models.PROTECT)
     question_order = models.PositiveIntegerField()
     question_stable_id = models.CharField(max_length=120)
-    question_version_number = models.PositiveIntegerField()
+    question_version_number = models.PositiveIntegerField(default=0)
     question_template = models.TextField()
     submitted_question = models.TextField()
     outcome = models.CharField(max_length=12, choices=Outcome.choices, default=Outcome.PENDING)
@@ -335,6 +436,21 @@ class Execution(models.Model):
             models.CheckConstraint(
                 condition=Q(outcome__in=("PENDING", "RUNNING", "SUCCESS", "ERROR", "TIMEOUT")),
                 name="evaluations_execution_outcome",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        conversation_attempt__isnull=True,
+                        conversation_turn__isnull=True,
+                        question__isnull=False,
+                        question_version__isnull=False,
+                    )
+                    | Q(
+                        conversation_attempt__isnull=False,
+                        conversation_turn__isnull=False,
+                    )
+                ),
+                name="evaluations_execution_question_or_conversation_turn",
             ),
             models.CheckConstraint(
                 condition=(

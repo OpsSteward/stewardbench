@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Conversation scenarios · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs">Catalog / Conversation scenarios</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><h1>Conversation scenarios</h1><p>Versioned, ordered evaluations that require one target session.</p></div>{% if user.is_stewardbench_admin %}<a class="button primary" href="{% url 'conversation-scenario-create' %}">Create scenario</a>{% endif %}</header>
+<section class="panel"><div class="table-wrap"><table><thead><tr><th>ID / name</th><th>Lifecycle</th><th>Current version</th><th>Turns</th><th>Domain / tags</th></tr></thead><tbody>
+{% for scenario in scenarios %}{% with version=scenario.current_version %}<tr><td><a href="{% url 'conversation-scenario-detail' scenario.stable_id %}">{{ scenario.stable_id }}</a><br><small>{{ scenario.name }}</small></td><td><span class="badge">{{ scenario.lifecycle }}</span></td><td>{% if version %}v{{ version.version_number }}{% else %}—{% endif %}</td><td>{% if version %}{{ version.turns.count }}{% else %}0{% endif %}</td><td>{{ scenario.domain|default:"—" }}{% for tag in scenario.tags.all %}<br><small>{{ tag.name }}</small>{% endfor %}</td></tr>{% endwith %}{% empty %}<tr><td colspan="5">No conversation scenarios have been defined.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

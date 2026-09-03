@@ -1,3 +1,5 @@
+import json
+import os
 from urllib.parse import urlsplit
 
 from django.conf import settings
@@ -366,6 +368,213 @@ class QuestionVersion(ImmutableTemporalModel):
 
     def __str__(self):
         return f"{self.question.stable_id} v{self.version_number}"
+
+
+class ConversationScenario(AttributedModel):
+    """Stable identity for an ordered, versioned conversation definition.
+
+    Conversation scenarios deliberately sit beside canonical Questions: a turn
+    can point at an existing QuestionVersion when that is meaningful, but a
+    contextual follow-up does not have to be promoted to a standalone Question.
+    """
+
+    class Lifecycle(models.TextChoices):
+        DRAFT = "DRAFT", "Draft"
+        ACTIVE = "ACTIVE", "Active"
+        RETIRED = "RETIRED", "Retired"
+
+    stable_id = models.CharField(max_length=120, unique=True, validators=[stable_id_validator])
+    question = models.OneToOneField(
+        Question,
+        on_delete=models.PROTECT,
+        related_name="conversation_scenario",
+        help_text="Stable CONVERSATION Question companion; ScenarioVersion owns executable turns.",
+    )
+    name = models.CharField(max_length=180)
+    description = models.TextField(blank=True)
+    lifecycle = models.CharField(max_length=8, choices=Lifecycle.choices, default=Lifecycle.DRAFT)
+    domain = models.ForeignKey(
+        Domain,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="conversation_scenarios",
+    )
+    tags = models.ManyToManyField(Tag, related_name="conversation_scenarios", blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_catalog_conversation_scenarios",
+    )
+
+    class Meta:
+        ordering = ("stable_id",)
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(lifecycle__in=("DRAFT", "ACTIVE", "RETIRED")),
+                name="catalog_conversation_scenario_lifecycle",
+            ),
+            models.CheckConstraint(
+                condition=~Q(lifecycle="ACTIVE") | Q(domain__isnull=False),
+                name="catalog_active_scenario_has_domain",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.stable_id}: {self.name}"
+
+    @property
+    def current_version(self):
+        return self.versions.filter(valid_to__isnull=True).first()
+
+
+class ConversationScenarioVersion(ImmutableTemporalModel):
+    """Immutable executable scenario definition; turn changes create a new row."""
+
+    scenario = models.ForeignKey(
+        ConversationScenario,
+        on_delete=models.PROTECT,
+        related_name="versions",
+    )
+    version_number = models.PositiveIntegerField()
+    scenario_question_version = models.OneToOneField(
+        QuestionVersion,
+        on_delete=models.PROTECT,
+        related_name="conversation_scenario_version",
+    )
+    definition = models.TextField(blank=True)
+    expected_session_behavior = models.CharField(max_length=160, default="shared-session-required")
+
+    class Meta:
+        ordering = ("-version_number",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("scenario", "version_number"),
+                name="catalog_conversation_version_number_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("scenario",),
+                condition=Q(valid_to__isnull=True),
+                name="catalog_conversation_one_current_version",
+            ),
+            models.CheckConstraint(
+                condition=Q(valid_to__isnull=True) | Q(valid_to__gt=models.F("valid_from")),
+                name="catalog_conversation_version_valid_range",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.scenario.stable_id} v{self.version_number}"
+
+    def clean(self):
+        super().clean()
+        if (
+            self.scenario_question_version_id
+            and self.scenario_question_version.question_id != self.scenario.question_id
+        ):
+            raise ValidationError(
+                {
+                    "scenario_question_version": (
+                        "The ScenarioVersion must be paired with a version of its own "
+                        "stable CONVERSATION Question companion."
+                    )
+                }
+            )
+
+
+class ConversationTurn(models.Model):
+    """One immutable, ordinal turn within a ScenarioVersion."""
+
+    scenario_version = models.ForeignKey(
+        ConversationScenarioVersion,
+        on_delete=models.PROTECT,
+        related_name="turns",
+    )
+    ordinal = models.PositiveSmallIntegerField()
+    stable_turn_id = models.CharField(max_length=160, validators=[stable_id_validator])
+    prompt_template = models.TextField()
+    canonical_question = models.ForeignKey(
+        Question,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="conversation_turns",
+    )
+    canonical_question_version = models.ForeignKey(
+        QuestionVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="conversation_turns",
+    )
+    static_bindings = models.JSONField(default=dict, blank=True)
+    required_for_overall = models.BooleanField(default=True)
+    source_sheet = models.CharField(max_length=120, blank=True)
+    source_row = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_catalog_conversation_turns",
+    )
+
+    class Meta:
+        ordering = ("scenario_version", "ordinal")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("scenario_version", "ordinal"),
+                name="catalog_conversation_turn_ordinal_unique",
+            ),
+            models.UniqueConstraint(
+                fields=("scenario_version", "stable_turn_id"),
+                name="catalog_conversation_turn_stable_id_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(ordinal__gte=1),
+                name="catalog_conversation_turn_positive_ordinal",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.scenario_version} turn {self.ordinal}"
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Conversation turns are immutable; create a new scenario version.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Conversation turns are historical definitions and cannot be deleted.")
+
+    def clean(self):
+        super().clean()
+        if self.canonical_question_version_id:
+            if self.canonical_question_id and (
+                self.canonical_question_version.question_id != self.canonical_question_id
+            ):
+                raise ValidationError(
+                    {"canonical_question_version": "The selected QuestionVersion belongs to another Question."}
+                )
+            if not self.canonical_question_id:
+                self.canonical_question = self.canonical_question_version.question
+        if self.canonical_question_id and self.canonical_question.kind != Question.Kind.SINGLE_TURN:
+            raise ValidationError(
+                {"canonical_question": "Conversation turns may link only to canonical single-turn Questions."}
+            )
+        if not isinstance(self.static_bindings, dict):
+            raise ValidationError({"static_bindings": "Static bindings must be an object."})
+        sensitive_fragments = ("password", "secret", "token", "authorization", "cookie")
+        if any(any(fragment in str(key).casefold() for fragment in sensitive_fragments) for key in self.static_bindings):
+            raise ValidationError({"static_bindings": "Static bindings cannot contain credential-shaped names."})
+        serialized_bindings = json.dumps(self.static_bindings, ensure_ascii=False, sort_keys=True)
+        runtime_secrets = [
+            value
+            for name, value in os.environ.items()
+            if name.startswith("STEWARD_BENCH_TARGET_CREDENTIAL_") and value
+        ]
+        if any(secret in serialized_bindings for secret in runtime_secrets):
+            raise ValidationError({"static_bindings": "Static bindings cannot contain a configured runtime credential."})
 
 
 class BindingDefinition(AttributedModel):

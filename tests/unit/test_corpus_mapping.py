@@ -9,6 +9,7 @@ from corpus.mapping import load_mapping
 
 
 MAPPING_PATH = settings.BASE_DIR / "import_mappings/v2_dev_troubleshooting_v1.json"
+CONVERSATION_MAPPING_PATH = settings.BASE_DIR / "import_mappings/conversation_scenarios_v1.json"
 WORKBOOK_PATH = settings.BASE_DIR / "docs/reference/v2-dev-troubleshooting.xlsx"
 
 
@@ -93,3 +94,50 @@ def test_mapping_change_without_version_change_is_rejected(tmp_path):
 
     with pytest.raises(ValidationError, match="separator rows"):
         load_mapping(changed)
+
+
+def test_conversation_mapping_v1_uses_only_the_explicit_blueprint_session():
+    """M8 must not silently extend the approved six-turn source grouping."""
+
+    mapping = json.loads(CONVERSATION_MAPPING_PATH.read_text(encoding="utf-8"))
+
+    assert mapping["mapping_version"] == "conversation-scenarios-v1"
+    assert mapping["source_workbook"] == "docs/reference/v2-dev-troubleshooting.xlsx"
+    assert mapping["source_checksum_sha256"] == hashlib.sha256(WORKBOOK_PATH.read_bytes()).hexdigest()
+    assert mapping["scenarios"] == [
+        {
+            "stable_id": "RUBIN-CONV-01",
+            "name": "Rubin desired-state EVC follow-up",
+            "definition_version": 1,
+            "source_authority": "docs/reference/OPSS_EVALUATION_LAB_BLUEPRINT.md section 14",
+            "turns": [
+                {
+                    "ordinal": ordinal,
+                    "canonical_question_id": question_id,
+                    "source_sheet": "target questions",
+                    "source_row": source_row,
+                    "required_for_overall": True,
+                }
+                for ordinal, question_id, source_row in [
+                    (1, "PROFILE-004", 187),
+                    (2, "PROFILE-007", 190),
+                    (3, "PROFILE-010", 193),
+                    (4, "PROFILE-011", 194),
+                    (5, "PROFILE-012", 195),
+                    (6, "PROFILE-013", 196),
+                ]
+            ],
+        }
+    ]
+    assert mapping["unresolved_rows"] == [
+        {
+            "source_sheet": "target questions",
+            "source_rows": [197, 198, 199, 200, 201, 202],
+            "warning": "CONVERSATION_GROUPING_DEFERRED",
+            "reason": (
+                "The workbook supplies no scenario/session metadata. The retained blueprint explicitly demonstrates only "
+                "rows 187, 190, and 193-196; it does not settle whether rows 197-202 extend that session, begin "
+                "another session, or remain standalone. Product-owner grouping/turn-order approval is required."
+            ),
+        }
+    ]

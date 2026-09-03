@@ -44,8 +44,10 @@ retry/rerun history. M6 adds named immutable Baselines, controlled replay using
 the exact historical QuestionVersion/bindings/concrete question, and versioned
 exact comparison. M7 adds append-only, versioned semantic triage with a
 deterministic acceptance comparator; the real provider/model remains an
-explicit open decision. Real OpsSteward wire-contract certification remains a
-later milestone.
+explicit open decision. M8 adds versioned ordered conversation scenarios, a
+durable shared target-session attempt, per-turn transcript/review/comparison
+evidence, and full retries from Turn 1. Real OpsSteward wire-contract
+certification remains a later milestone.
 
 ## Run with Docker
 
@@ -134,5 +136,5 @@ and future executable acceptance-harness architectures are now documented.
 The authoritative v1 implementation milestone plan pairs each product increment
 with development tests and independent acceptance evidence. The repository-
 specific development and independent QA/acceptance skills govern implementation
-and acceptance work. M0 through M6 are implemented; M7 and later milestones
+and acceptance work. M0 through M8 are implemented; M9 and later milestones
 remain separately authorized.

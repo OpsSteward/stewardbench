@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Run {{ scenario.stable_id }} · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'conversation-scenario-detail' scenario.stable_id %}">{{ scenario.stable_id }}</a> / Run complete scenario</p>{% endblock %}
+{% block content %}
+<header class="page-header"><h1>Run {{ scenario.name }}</h1><p>Version {{ version.version_number }} will begin at Turn 1 and use one fresh target conversation/session identity. Turns are always sequential.</p></header>
+<form method="post" class="stack">{% csrf_token %}<section class="panel form-panel">{% if form.non_field_errors %}<div class="error">{{ form.non_field_errors }}</div>{% endif %}<div class="field">{{ form.target.label_tag }} {{ form.target }}{{ form.target.errors }}<p class="help">Only targets declaring the technical CONVERSATION_SESSION capability are selectable. StewardBench will not substitute independent one-shot requests.</p></div><div class="actions"><button class="button primary" type="submit">Create conversation Run</button><a class="button" href="{% url 'conversation-scenario-detail' scenario.stable_id %}">Cancel</a></div></section></form>
+{% endblock %}

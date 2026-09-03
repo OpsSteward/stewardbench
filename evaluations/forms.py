@@ -26,6 +26,19 @@ class LaunchRunForm(forms.Form):
         ).distinct().order_by("display_name")
 
 
+class LaunchConversationForm(forms.Form):
+    target = forms.ModelChoiceField(queryset=EvaluationTarget.objects.none(), label="Conversation-capable target")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["target"].queryset = EvaluationTarget.objects.filter(
+            is_active=True,
+            revisions__valid_to__isnull=True,
+            revisions__supports_question_api=True,
+            revisions__supports_conversation_session=True,
+        ).distinct().order_by("display_name")
+
+
 class HumanReviewForm(forms.Form):
     judgment = forms.ChoiceField(choices=HumanReview.Judgment.choices)
     comment = forms.CharField(
@@ -94,7 +107,7 @@ class ControlledComparisonRunForm(forms.Form):
         help_text="Current target/build identity is frozen at launch; baseline questions and bindings remain historical.",
     )
 
-    def __init__(self, *args, baseline: Baseline | None = None, **kwargs):
+    def __init__(self, *args, baseline: Baseline | None = None, conversation_required=False, **kwargs):
         super().__init__(*args, **kwargs)
         targets = EvaluationTarget.objects.filter(
             is_active=True,
@@ -106,4 +119,6 @@ class ControlledComparisonRunForm(forms.Form):
                 product_id=baseline.source_target.product_id,
                 environment_id=baseline.source_target.environment_id,
             )
+        if conversation_required:
+            targets = targets.filter(revisions__supports_conversation_session=True)
         self.fields["target"].queryset = targets

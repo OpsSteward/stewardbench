@@ -1,0 +1,29 @@
+{
+  "mapping_version": "conversation-scenarios-v1",
+  "source_workbook": "docs/reference/v2-dev-troubleshooting.xlsx",
+  "source_checksum_sha256": "559ad19500eae888c250c38d3c7213bdf38912d611cd0dbc4dfa2556fa6ec8ff",
+  "scenarios": [
+    {
+      "stable_id": "RUBIN-CONV-01",
+      "name": "Rubin desired-state EVC follow-up",
+      "definition_version": 1,
+      "source_authority": "docs/reference/OPSS_EVALUATION_LAB_BLUEPRINT.md section 14",
+      "turns": [
+        {"ordinal": 1, "canonical_question_id": "PROFILE-004", "source_sheet": "target questions", "source_row": 187, "required_for_overall": true},
+        {"ordinal": 2, "canonical_question_id": "PROFILE-007", "source_sheet": "target questions", "source_row": 190, "required_for_overall": true},
+        {"ordinal": 3, "canonical_question_id": "PROFILE-010", "source_sheet": "target questions", "source_row": 193, "required_for_overall": true},
+        {"ordinal": 4, "canonical_question_id": "PROFILE-011", "source_sheet": "target questions", "source_row": 194, "required_for_overall": true},
+        {"ordinal": 5, "canonical_question_id": "PROFILE-012", "source_sheet": "target questions", "source_row": 195, "required_for_overall": true},
+        {"ordinal": 6, "canonical_question_id": "PROFILE-013", "source_sheet": "target questions", "source_row": 196, "required_for_overall": true}
+      ]
+    }
+  ],
+  "unresolved_rows": [
+    {
+      "source_sheet": "target questions",
+      "source_rows": [197, 198, 199, 200, 201, 202],
+      "warning": "CONVERSATION_GROUPING_DEFERRED",
+      "reason": "The workbook supplies no scenario/session metadata. The retained blueprint explicitly demonstrates only rows 187, 190, and 193-196; it does not settle whether rows 197-202 extend that session, begin another session, or remain standalone. Product-owner grouping/turn-order approval is required."
+    }
+  ]
+}

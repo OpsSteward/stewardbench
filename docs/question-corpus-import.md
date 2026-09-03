@@ -442,6 +442,16 @@ and records `CONVERSATION_GROUPING_DEFERRED` for the whole range. It does not
 assert membership, order, parentage, or session semantics. M8 may add scenario
 membership without changing these M2 stable Question identities.
 
+M8 adds the repository-controlled
+[`conversation-scenarios-v1` mapping](../import_mappings/conversation_scenarios_v1.json).
+It maps the one conversation explicitly illustrated by the retained blueprint:
+`RUBIN-CONV-01` uses source rows 187, 190, and 193–196 in that exact order
+(`PROFILE-004`, `PROFILE-007`, and `PROFILE-010`–`PROFILE-013`). The mapping
+retains each source row and canonical Question ID. Rows 197–202 remain explicitly
+unresolved: neither the workbook nor the blueprint settles whether they extend
+that session, begin another scenario, or stay standalone. They require a
+product-owner grouping/turn-order decision and are not silently included.
+
 ## Variables and resolved bindings
 
 The workbook has no variable declaration, placeholder syntax, resolver, or

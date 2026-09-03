@@ -3,6 +3,7 @@ from django.forms import formset_factory
 
 from .models import (
     BindingDefinition,
+    ConversationScenario,
     Domain,
     Environment,
     HistoricalFixture,
@@ -116,7 +117,7 @@ class TargetRevisionForm(forms.ModelForm):
 
 class QuestionCreateForm(forms.Form):
     stable_id = forms.CharField(max_length=120)
-    kind = forms.ChoiceField(choices=Question.Kind.choices)
+    kind = forms.ChoiceField(choices=((Question.Kind.SINGLE_TURN, "Single turn"),))
     lifecycle = forms.ChoiceField(choices=Question.Lifecycle.choices)
     domain = forms.ModelChoiceField(queryset=Domain.objects.all(), required=False)
     tags = forms.ModelMultipleChoiceField(queryset=Tag.objects.all(), required=False)
@@ -139,6 +140,70 @@ class QuestionVersionForm(forms.Form):
         required=False,
     )
     change_reason = forms.CharField(widget=forms.Textarea, required=False)
+
+
+class ConversationScenarioForm(forms.Form):
+    stable_id = forms.CharField(max_length=120)
+    name = forms.CharField(max_length=180)
+    description = forms.CharField(widget=forms.Textarea, required=False)
+    lifecycle = forms.ChoiceField(choices=ConversationScenario.Lifecycle.choices)
+    domain = forms.ModelChoiceField(queryset=Domain.objects.all(), required=False)
+    tags = forms.ModelMultipleChoiceField(queryset=Tag.objects.all(), required=False)
+    definition = forms.CharField(
+        widget=forms.Textarea,
+        required=False,
+        help_text="Version-bound execution rationale or expected session behavior.",
+    )
+
+
+class ConversationScenarioMetadataForm(forms.Form):
+    name = forms.CharField(max_length=180)
+    description = forms.CharField(widget=forms.Textarea, required=False)
+    lifecycle = forms.ChoiceField(choices=ConversationScenario.Lifecycle.choices)
+    domain = forms.ModelChoiceField(queryset=Domain.objects.all(), required=False)
+    tags = forms.ModelMultipleChoiceField(queryset=Tag.objects.all(), required=False)
+
+
+class ConversationScenarioVersionForm(forms.Form):
+    definition = forms.CharField(
+        widget=forms.Textarea,
+        required=False,
+        help_text="Version-bound execution rationale or expected session behavior.",
+    )
+
+
+class ConversationTurnInputForm(forms.Form):
+    prompt_template = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 2}),
+        required=False,
+        help_text="Required unless a canonical QuestionVersion is selected.",
+    )
+    canonical_question_version = forms.ModelChoiceField(
+        queryset=QuestionVersion.objects.filter(
+            question__kind=Question.Kind.SINGLE_TURN
+        ).select_related("question"),
+        required=False,
+        help_text="Use the exact canonical text instead of duplicating an existing Question.",
+    )
+    static_bindings = forms.JSONField(required=False, initial=dict)
+    required_for_overall = forms.BooleanField(required=False, initial=True)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("prompt_template", "").strip() and not cleaned.get("canonical_question_version"):
+            # ``required_for_overall`` has a True initial value.  It must not
+            # turn every unused extra form into a phantom turn validation
+            # error; only actual prompt/binding content makes the row active.
+            if cleaned.get("static_bindings") not in (None, {}):
+                self.add_error("prompt_template", "Enter a prompt or choose a canonical QuestionVersion.")
+            return cleaned
+        bindings = cleaned.get("static_bindings") or {}
+        if not isinstance(bindings, dict):
+            self.add_error("static_bindings", "Static bindings must be an object.")
+        return cleaned
+
+
+ConversationTurnFormSet = formset_factory(ConversationTurnInputForm, extra=8, can_delete=True)
 
 
 class BindingDefinitionInputForm(forms.Form):
