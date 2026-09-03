@@ -37,6 +37,7 @@ begun.
 
 ## Documentation
 
+- [Agent operating contract](AGENTS.md)
 - [Documentation index](docs/README.md)
 - [Product definition](docs/product-definition.md)
 - [Architecture](docs/architecture.md)
