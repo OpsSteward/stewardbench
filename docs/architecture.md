@@ -320,6 +320,12 @@ requested mode, configured target maximum, and actual concurrency setting.
 Performance views must not silently present sequential and parallel runs as
 equivalent conditions.
 
+For v1 worker admission, target-wide capacity is scoped to the exact frozen
+TargetRevision: all active claims for that revision share its frozen maximum.
+It is not a mutable current-target safety ceiling. A newly created
+TargetRevision has distinct endpoint/configuration identity and its own policy;
+an older Run therefore never silently adopts the newer revision's maximum.
+
 ## Baseline and comparison architecture
 
 A Baseline is an immutable named reference to a completed run and its captured

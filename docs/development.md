@@ -1,9 +1,9 @@
 # Development and deployment
 
 This page documents the implemented M0 foundation, M1 managed catalog, M2
-reconciled corpus import, and the bounded M3 durable execution slice. M3 does
-not imply human review, retries/reruns, baselines, comparison, conversations,
-parallel execution, or real OpsSteward wire-contract certification.
+reconciled corpus import, M3 frozen execution slice, and M4 durable worker.
+M4 does not imply human review, retries/reruns, baselines, comparison,
+conversations, or real OpsSteward wire-contract certification.
 
 ## Runtime and configuration
 
@@ -34,10 +34,10 @@ for the deployed HTTPS origin. Never put `.env` into an image or commit it.
 - `worker`: the same image running `python manage.py run_worker`; and
 - `db`: PostgreSQL 17.11 with the named `postgres_data` volume.
 
-The worker performs M3 sequential durable execution. A browser request creates
-the complete Run/Execution manifest in PostgreSQL and returns; the worker later
-processes one pending Execution at a time. It never holds a database transaction
-across a target call. Both application services wait for PostgreSQL health.
+The worker performs M4 durable execution. A browser request creates the
+complete Run/Execution manifest in PostgreSQL and returns; worker processes
+later claim eligible Executions. It never holds a database transaction across a
+target call. Both application services wait for PostgreSQL health.
 Migrations remain an explicit one-shot operation and never run implicitly in
 web or worker startup.
 
@@ -65,11 +65,11 @@ endpoint form rejects user information, query parameters, and fragments, and
 fixture fixed-parameter keys reject credential-shaped names. Never put usable
 credentials into catalog records.
 
-## M3 durable evaluation
+## M3 frozen evaluation
 
 An ADMIN activates one or more single-turn Questions, selects them from
-**Questions**, chooses one target, and creates a **Sequential** run. `Select all
-matching` is resolved at launch to all currently filtered eligible `ACTIVE`
+**Questions**, chooses one target, and creates a Run. `Select all matching` is
+resolved at launch to all currently filtered eligible `ACTIVE`
 single-turn Questions, never merely the current page and never future catalog
 records. DRAFT, RETIRED, and conversation Questions are not M3 launch-eligible.
 OPERATOR may browse Runs and Executions but cannot launch one through either the
@@ -120,22 +120,57 @@ per-run synthetic control token and do not publish that port outside the test
 network. The control token protects configuration/reset/journal endpoints. Its
 append-only journal records request correlation, concrete submitted question,
 request fingerprint, timestamps, mode, and observed concurrency independently
-of StewardBench. It supports
-complete Unicode answers, delays/timeouts, HTTP/auth errors,
-malformed/incomplete/wrong-content-type responses, unsafe HTML, and metadata
-available/unavailable/malformed modes.
+of StewardBench. It supports complete Unicode answers, delays/timeouts,
+HTTP/auth errors, malformed/incomplete/wrong-content-type responses, unsafe
+HTML, metadata available/unavailable/malformed modes, scripted per-request
+dispositions, and test-only before-acceptance, after-acceptance, and
+before-response barriers. The journal also exposes per-correlation counts and
+observed concurrent requests so it independently detects duplicate submissions
+and capacity violations.
 
-M3 restart behavior is intentionally conservative pending M4 claim/lease
-work: terminal Executions remain untouched. On worker start, a persisted
-`RUNNING` Execution is finalized as `ERROR` with
-`AMBIGUOUS_INFRASTRUCTURE`; it is never silently submitted again because M3
-cannot prove whether the target accepted it. M4 owns safe reclaim, multi-worker
-claims, leases, heartbeats, and parallel dispatch.
+## M4 durable worker
+
+The launch form offers **Sequential** and **Parallel** mode. The frozen Run
+stores the requested mode, the TargetRevision maximum, and the actual Run
+maximum: sequential is always one; parallel is the lesser of the frozen target
+maximum and `WORKER_MAX_CONCURRENCY` at launch. The Run detail shows all three
+values. `WORKER_MAX_CONCURRENCY` defaults to `8`; it is a positive bounded
+worker setting, not a user scheduling control.
+
+Each active Execution has a generated worker identity, claim token, claim
+attempt number, database-clock claim/lease/heartbeat timestamps, and a small
+target-call phase. A short PostgreSQL transaction claims a `PENDING` row using
+`SKIP LOCKED`, locks the exact TargetRevision only while admitting capacity, and
+commits before any adapter I/O. Completion locks the row again and succeeds
+only for the matching token. Terminal rows retain their final claim evidence and
+are never claimed again.
+
+The worker heartbeats long adapter calls. Capacity is count-derived from durable
+unexpired claims, never from process memory: sequential Runs have at most one
+active claim; parallel Runs have at most their frozen actual maximum; and all
+active Runs using the same frozen TargetRevision share its frozen target
+maximum. A newer TargetRevision does not silently change an old Run's policy or
+share this v1 revision-scoped capacity bucket. Optional inter-question delay is
+also persisted as the Run's next eligible dispatch time, so another worker
+cannot bypass it.
+
+Recovery is deliberately asymmetric. An expired `CLAIMED` row has not crossed
+the durable submission boundary and returns to `PENDING` for one safe later
+claim. An expired `SUBMISSION_STARTED` row, and a legacy interrupted M3 row,
+becomes terminal `ERROR` with `AMBIGUOUS_INFRASTRUCTURE`; it is not resubmitted.
+TIMEOUT, adapter errors, malformed responses, and one sibling's failure each
+reach their own terminal observation while other planned work continues. No M4
+path introduces general automatic remote retries.
+
+`WORKER_LEASE_SECONDS` defaults to `30` and `WORKER_HEARTBEAT_SECONDS` defaults
+to `10`; heartbeat must be smaller than the lease. PostgreSQL's clock is used
+for lease decisions. `WORKER_POLL_SECONDS` remains a simple bounded polling
+cadence.
 
 The Product and Environment examples in the product definition are not loaded
 automatically. Configure them explicitly through the ADMIN UI so initial data
 is visible, reversible, and environment-appropriate. Catalog configuration
-itself performs no target call; only the separate M3 worker performs a frozen
+itself performs no target call; only the separate M4 worker performs a frozen
 Run through its configured adapter.
 
 ## Reconciled source corpus

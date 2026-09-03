@@ -2,7 +2,7 @@
 {% block title %}Launch run · StewardBench{% endblock %}
 {% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'question-list' %}">Questions</a> / Launch run</p>{% endblock %}
 {% block content %}
-<header class="page-header"><h1>Launch sequential evaluation</h1><p>The browser only records a frozen plan. The dedicated worker performs target calls later.</p></header>
+<header class="page-header"><h1>Launch evaluation</h1><p>The browser only records a frozen plan. The dedicated worker performs target calls later.</p></header>
 <form method="post" class="stack">
   {% csrf_token %}
   <section class="panel form-panel">
@@ -13,8 +13,8 @@
     {% for question_id in selected_ids %}<input type="hidden" name="question_ids" value="{{ question_id }}">{% endfor %}
     {% for key,value in filters.items %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
     <div class="field">{{ form.target.label_tag }} {{ form.target }}{{ form.target.errors }}</div>
-    {% if not single_question %}<div class="field"><label>{{ form.select_all_matching }} Select all currently filtered eligible ACTIVE single-turn questions</label><p class="help">Draft and retired questions are never included. Parallel execution is not available in M3.</p></div>{% endif %}
-    <div class="field"><label>Execution mode</label><input value="Sequential (M3 only)" disabled></div>
+    {% if not single_question %}<div class="field"><label>{{ form.select_all_matching }} Select all currently filtered eligible ACTIVE single-turn questions</label><p class="help">Draft and retired questions are never included.</p></div>{% endif %}
+    <div class="field">{{ form.execution_mode.label_tag }} {{ form.execution_mode }}{{ form.execution_mode.errors }}<p class="help">Sequential admits one in-flight request per Run. Parallel is bounded by the frozen target policy and worker limit.</p></div>
     <div class="actions"><button class="button primary" type="submit">Create durable run</button><a class="button" href="{% url 'question-list' %}">Cancel</a></div>
   </section>
 </form>

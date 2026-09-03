@@ -24,6 +24,7 @@ class EvaluationRun(models.Model):
 
     class ExecutionMode(models.TextChoices):
         SEQUENTIAL = "SEQUENTIAL", "Sequential"
+        PARALLEL = "PARALLEL", "Parallel"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     target = models.ForeignKey(EvaluationTarget, on_delete=models.PROTECT, related_name="runs")
@@ -52,6 +53,7 @@ class EvaluationRun(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    next_dispatch_at = models.DateTimeField(null=True, blank=True)
     diagnostic_class = models.CharField(max_length=80, blank=True)
     diagnostic_detail = models.TextField(blank=True)
 
@@ -71,12 +73,14 @@ class EvaluationRun(models.Model):
                 name="evaluations_run_state",
             ),
             models.CheckConstraint(
-                condition=Q(requested_mode="SEQUENTIAL"),
-                name="evaluations_m3_sequential_only",
+                condition=Q(requested_mode__in=("SEQUENTIAL", "PARALLEL")),
+                name="evaluations_run_execution_mode",
             ),
             models.CheckConstraint(
-                condition=Q(actual_concurrency=1),
-                name="evaluations_m3_actual_concurrency_one",
+                condition=Q(configured_max_concurrency__gte=1)
+                & Q(actual_concurrency__gte=1)
+                & Q(actual_concurrency__lte=models.F("configured_max_concurrency")),
+                name="evaluations_run_concurrency_bounds",
             ),
             models.CheckConstraint(
                 condition=Q(total_planned__gte=1),
@@ -187,6 +191,20 @@ class Execution(models.Model):
         ERROR = "ERROR", "Error"
         TIMEOUT = "TIMEOUT", "Timeout"
 
+    class TargetCallPhase(models.TextChoices):
+        """The recovery-relevant boundary of the target question call.
+
+        ``LEGACY_UNKNOWN`` is reserved for a non-terminal M3 row encountered
+        by the forward-only M4 migration.  It is never assigned to new work
+        and is conservatively finalized during reconciliation.
+        """
+
+        NONE = "NONE", "No active claim"
+        CLAIMED = "CLAIMED", "Claimed before target submission"
+        SUBMISSION_STARTED = "SUBMISSION_STARTED", "Target submission may have occurred"
+        TERMINAL = "TERMINAL", "Terminal observation persisted"
+        LEGACY_UNKNOWN = "LEGACY_UNKNOWN", "Legacy interrupted work"
+
     run = models.ForeignKey(EvaluationRun, on_delete=models.PROTECT, related_name="executions")
     question = models.ForeignKey(Question, on_delete=models.PROTECT, related_name="executions")
     question_version = models.ForeignKey(
@@ -220,6 +238,17 @@ class Execution(models.Model):
     error_detail = models.TextField(blank=True)
     preflight_error_class = models.CharField(max_length=80, blank=True)
     preflight_error_detail = models.TextField(blank=True)
+    claim_worker_id = models.CharField(max_length=200, blank=True)
+    claim_token = models.UUIDField(null=True, blank=True, editable=False)
+    claim_attempt = models.PositiveIntegerField(default=0)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    claim_lease_expires_at = models.DateTimeField(null=True, blank=True)
+    claim_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    target_call_phase = models.CharField(
+        max_length=24,
+        choices=TargetCallPhase.choices,
+        default=TargetCallPhase.NONE,
+    )
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     latency_ms = models.PositiveIntegerField(null=True, blank=True)
@@ -234,6 +263,51 @@ class Execution(models.Model):
             models.CheckConstraint(
                 condition=Q(outcome__in=("PENDING", "RUNNING", "SUCCESS", "ERROR", "TIMEOUT")),
                 name="evaluations_execution_outcome",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        outcome="PENDING",
+                        target_call_phase="NONE",
+                        claim_worker_id="",
+                        claim_token__isnull=True,
+                        claimed_at__isnull=True,
+                        claim_lease_expires_at__isnull=True,
+                        claim_heartbeat_at__isnull=True,
+                    )
+                    |
+                    Q(
+                        outcome="RUNNING",
+                        target_call_phase__in=("CLAIMED", "SUBMISSION_STARTED"),
+                        claim_token__isnull=False,
+                        claimed_at__isnull=False,
+                        claim_lease_expires_at__isnull=False,
+                        claim_heartbeat_at__isnull=False,
+                    )
+                    & ~Q(claim_worker_id="")
+                    |
+                    Q(
+                        outcome="RUNNING",
+                        target_call_phase__in=("NONE", "LEGACY_UNKNOWN"),
+                        claim_worker_id="",
+                        claim_token__isnull=True,
+                    )
+                    | Q(
+                        outcome__in=("SUCCESS", "ERROR", "TIMEOUT"),
+                        target_call_phase__in=("NONE", "TERMINAL"),
+                    )
+                ),
+                name="evaluations_execution_claim_state",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("outcome", "target_revision", "claim_lease_expires_at"),
+                name="eval_exec_claim_idx",
+            ),
+            models.Index(
+                fields=("run", "outcome", "question_order"),
+                name="eval_exec_run_claim_idx",
             ),
         ]
 

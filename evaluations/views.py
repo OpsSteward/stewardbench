@@ -90,11 +90,12 @@ def launch_run_view(request):
                     question_ids=request.POST.getlist("question_ids"),
                     select_all=form.cleaned_data["select_all_matching"],
                     filters=_filters_from_request(request),
+                    execution_mode=form.cleaned_data["execution_mode"],
                 )
             except (PermissionDenied, ValidationError) as error:
                 form.add_error(None, error)
             else:
-                messages.success(request, f"Sequential run {run.id} was created and is awaiting the worker.")
+                messages.success(request, f"{run.get_requested_mode_display()} run {run.id} was created and is awaiting the worker.")
                 return redirect("run-detail", run_id=run.id)
     else:
         form = LaunchRunForm(initial={"select_all_matching": request.GET.get("all") == "1"})
@@ -127,11 +128,12 @@ def launch_one_question_view(request, question_id):
                     actor=request.user,
                     target=form.cleaned_data["target"],
                     question_ids=(question.pk,),
+                    execution_mode=form.cleaned_data["execution_mode"],
                 )
             except (PermissionDenied, ValidationError) as error:
                 form.add_error(None, error)
             else:
-                messages.success(request, f"Sequential run {run.id} was created and is awaiting the worker.")
+                messages.success(request, f"{run.get_requested_mode_display()} run {run.id} was created and is awaiting the worker.")
                 return redirect("run-detail", run_id=run.id)
     else:
         form = LaunchRunForm()

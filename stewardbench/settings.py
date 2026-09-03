@@ -26,6 +26,17 @@ def required_env(name):
     return value
 
 
+def positive_int_env(name, default, *, minimum=1, maximum=None):
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"{name} must be an integer") from exc
+    if value < minimum or (maximum is not None and value > maximum):
+        suffix = f" through {maximum}" if maximum is not None else " or greater"
+        raise ImproperlyConfigured(f"{name} must be {minimum}{suffix}")
+    return value
+
+
 SECRET_KEY = required_env("DJANGO_SECRET_KEY")
 DEBUG = env_bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = [
@@ -133,6 +144,11 @@ X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
 WORKER_POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "10"))
+WORKER_MAX_CONCURRENCY = positive_int_env("WORKER_MAX_CONCURRENCY", 8, maximum=64)
+WORKER_LEASE_SECONDS = positive_int_env("WORKER_LEASE_SECONDS", 30, maximum=86400)
+WORKER_HEARTBEAT_SECONDS = positive_int_env("WORKER_HEARTBEAT_SECONDS", 10, maximum=3600)
+if WORKER_HEARTBEAT_SECONDS >= WORKER_LEASE_SECONDS:
+    raise ImproperlyConfigured("WORKER_HEARTBEAT_SECONDS must be smaller than WORKER_LEASE_SECONDS")
 
 LOGGING = {
     "version": 1,

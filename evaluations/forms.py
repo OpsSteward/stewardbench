@@ -1,6 +1,7 @@
 from django import forms
 
 from catalog.models import EvaluationTarget
+from evaluations.models import EvaluationRun
 
 
 class LaunchRunForm(forms.Form):
@@ -9,6 +10,12 @@ class LaunchRunForm(forms.Form):
         label="Evaluation target",
     )
     select_all_matching = forms.BooleanField(required=False)
+    execution_mode = forms.ChoiceField(
+        choices=EvaluationRun.ExecutionMode.choices,
+        initial=EvaluationRun.ExecutionMode.SEQUENTIAL,
+        label="Execution mode",
+        required=False,
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

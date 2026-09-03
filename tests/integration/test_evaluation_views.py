@@ -3,7 +3,7 @@ from django.urls import reverse
 
 from catalog.models import TargetRevision
 from catalog.services import create_target_revision
-from evaluations.models import Execution
+from evaluations.models import EvaluationRun, Execution
 from evaluations.services import launch_run, process_next_execution
 from harness.fake_target import FakeTargetServer
 
@@ -54,6 +54,39 @@ def test_admin_launches_and_operator_can_only_view_runs(client, minimal_domain):
             {"target": minimal_domain["target"].pk, "question_ids": [minimal_domain["question"].pk]},
         )
         assert denied.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_can_freeze_parallel_mode_and_target_policy_in_the_run_manifest(client, minimal_domain):
+    with FakeTargetServer() as fake:
+        # Revision policy is immutable, so the parallel test policy is a new
+        # concrete revision rather than an edit to the fixture's old policy.
+        create_target_revision(
+            actor=minimal_domain["admin"],
+            target=minimal_domain["target"],
+            **{
+                **_revision_values(fake.endpoint),
+                "default_execution_mode": TargetRevision.ExecutionMode.PARALLEL,
+                "max_concurrency": 2,
+            },
+        )
+        client.force_login(minimal_domain["admin"])
+        launch_page = client.get(reverse("run-launch"))
+        assert launch_page.status_code == 200
+        assert b"Parallel" in launch_page.content
+        response = client.post(
+            reverse("run-launch"),
+            {
+                "target": minimal_domain["target"].pk,
+                "question_ids": [minimal_domain["question"].pk],
+                "execution_mode": EvaluationRun.ExecutionMode.PARALLEL,
+            },
+        )
+        assert response.status_code == 302
+        run = EvaluationRun.objects.get(pk=response["Location"].rstrip("/").split("/")[-1])
+        assert run.requested_mode == EvaluationRun.ExecutionMode.PARALLEL
+        assert run.configured_max_concurrency == 2
+        assert run.actual_concurrency == 2
 
 
 @pytest.mark.django_db

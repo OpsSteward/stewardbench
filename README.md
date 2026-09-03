@@ -33,10 +33,12 @@ a baseline is observed historical performance—not universal ground truth.
 M0 provides the runnable authenticated foundation. M1 adds the managed,
 product-neutral catalog. M2 adds the approved, non-destructive workbook import,
 immutable source provenance, deterministic draft Questions, and visibly
-uncontrolled legacy observations. M3 adds frozen sequential Run/Execution
-capture through the deterministic fake-target adapter. Human review, retries,
-baselines, comparison, and real OpsSteward wire-contract certification remain
-later milestones.
+uncontrolled legacy observations. M3 adds frozen Run/Execution capture through
+the deterministic fake-target adapter. M4 hardens it with PostgreSQL claim
+leases, multiple workers, sequential or bounded parallel execution,
+target-revision-wide capacity, and conservative ambiguous-call recovery. Human
+review, retries, baselines, comparison, and real OpsSteward wire-contract
+certification remain later milestones.
 
 ## Run with Docker
 
