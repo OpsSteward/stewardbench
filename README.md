@@ -31,10 +31,10 @@ a baseline is observed historical performance—not universal ground truth.
 ## Status
 
 M0 provides the runnable authenticated foundation. M1 adds the managed,
-product-neutral catalog: products, environments, stable targets with immutable
-configuration revisions, controlled domains/tags, historical fixtures, and
-stable questions with exact temporal versions. Execution, import, baselines,
-review, comparison, and evaluated-product adapters remain unimplemented.
+product-neutral catalog. M2 adds the approved, non-destructive workbook import,
+immutable source provenance, deterministic draft Questions, and visibly
+uncontrolled legacy observations. Execution, baselines, live review,
+comparison, and evaluated-product adapters remain unimplemented.
 
 ## Run with Docker
 
@@ -71,6 +71,18 @@ OPERATOR accounts can enter the application but have no administrative mutation
 access. ADMIN can curate the M1 catalog from **Questions**, **Products**,
 **Environments**, **Targets**, **Domains**, **Tags**, and **Historical
 fixtures**. OPERATOR can browse those same catalog records read-only.
+
+M2 corpus import is an explicit administrative command. Dry-run is the default;
+apply requires both `--apply` and an existing ADMIN username:
+
+```bash
+docker compose run --rm web python manage.py import_stewardbench_workbook --dry-run
+docker compose run --rm web python manage.py import_stewardbench_workbook \
+  --apply --actor your-admin
+```
+
+Both commands verify the repository workbook against the approved mapping v1
+checksum. Applied source history is browsable under **Corpus imports**.
 
 See [development and deployment instructions](docs/development.md) for checks,
 configuration, the worker foundation, Docker smoke, and DGX guidance.
@@ -109,7 +121,7 @@ configuration, the worker foundation, Docker smoke, and DGX guidance.
 See the [roadmap](docs/roadmap.md) for authoritative boundaries. The framework
 and future executable acceptance-harness architectures are now documented.
 The authoritative v1 implementation milestone plan pairs each product increment
-with development tests and independent acceptance evidence. M0 and M1 are
-implemented; later milestones remain separately authorized. The repository-
+with development tests and independent acceptance evidence. The repository-
 specific development and independent QA/acceptance skills govern implementation
-and acceptance work.
+and acceptance work. M0, M1, and M2 are implemented; later milestones remain
+separately authorized.

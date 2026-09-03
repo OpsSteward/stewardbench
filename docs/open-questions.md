@@ -14,13 +14,6 @@ changes the specified behavior.
 2. **Runtime metadata route and wire schema.** This documentation proposes a
    minimal optional payload, but OpsSteward must confirm the route, field names,
    authentication, and compatibility behavior.
-3. **Corpus import interpretation and approval.** Workbook structure is now
-   inventoried in [Question corpus import](question-corpus-import.md), but the
-   source does not define `Acceptable`, reviewer attribution, `Token`/`Total
-   time` semantics or units, target-sheet variable syntax, or conversation
-   grouping. A source owner/admin must also decide whether target rows 155–156
-   are one accidentally split question and how the `Interface Issues` sheet is
-   retained. Do not resolve these by inference in an importer.
 
 ## Resolved product-owner choices
 
@@ -29,15 +22,22 @@ changes the specified behavior.
   later worker evidence shows safe cooperative cancellation is effectively free,
   adding it still requires reviewed lifecycle/evidence semantics and acceptance
   coverage before implementation.
+- **StewardBench workbook mapping v1 is approved for M2 (2026-09-03).** It
+  supplies the product-owner target-block taxonomy, merges target rows 155–156,
+  maps deterministic legacy Yes/No values to imported GOOD/BAD evidence,
+  imports random rows as Generalization Questions, links four KB/RAG experiments
+  to one Question, excludes `Interface Issues`, and defers conversation grouping
+  and formal bindings. Missing reviewer/time/target/build identity and unknown
+  token/timing units intentionally remain unknown rather than open M2 blockers.
 
 ## Later technology decisions
 
-4. **Semantic comparator implementation/model/provider.** Select only after
+3. **Semantic comparator implementation/model/provider.** Select only after
    obtaining representative response pairs and defining an evaluation set for
    dangerous false-equivalence behavior.
-5. **LLM judge implementation/model/provider and initial rubric prompt.** The
+4. **LLM judge implementation/model/provider and initial rubric prompt.** The
    interface and retention requirements are set, but the provider/model are not.
-6. **Final brand source artwork.** The identity is approved, but final vector
+5. **Final brand source artwork.** The identity is approved, but final vector
    geometry, spacing, variants, and palette reference values require approved
    source assets.
 
@@ -47,17 +47,17 @@ The harness architecture and initial scenario catalog are settled in
 [Executable acceptance harness design](acceptance-harness-design.md). Later
 implementation must select:
 
-7. **Cross-platform worker process control.** Choose deterministic crash/barrier
+6. **Cross-platform worker process control.** Choose deterministic crash/barrier
    primitives that work for Linux CI, macOS development, and Docker.
-8. **Fake-target implementation dependency.** Choose the minimal Python HTTP
+7. **Fake-target implementation dependency.** Choose the minimal Python HTTP
    library and packaging command for the already-decided reusable service
    contract.
-9. **Playwright browser matrix.** Decide the smallest supported matrix beyond
+8. **Playwright browser matrix.** Decide the smallest supported matrix beyond
     the initial Chromium path, based on actual deployment needs.
-10. **Docker smoke orchestration.** Decide whether Compose is invoked directly
+9. **Docker smoke orchestration.** Decide whether Compose is invoked directly
     or coordinated through pytest while keeping independently reproducible
     steps.
-11. **Structured acceptance output.** Choose the compact machine-readable
+10. **Structured acceptance output.** Choose the compact machine-readable
     format accompanying pytest/JUnit and its future CI artifact-retention rule.
 
 These questions do not reopen settled decisions such as PostgreSQL-only

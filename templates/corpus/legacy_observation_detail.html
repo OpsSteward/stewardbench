@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Legacy observation {{ observation.pk }} · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'dashboard' %}">Dashboard</a> / <a href="{% url 'import-batch-detail' observation.source_row.batch.pk %}">Import {{ observation.source_row.batch.pk }}</a> / Legacy observation {{ observation.pk }}</p>{% endblock %}
+{% block content %}
+  <div class="page-header"><div><h1>Imported legacy/manual observation</h1><p>This is uncontrolled historical source evidence, not an EvaluationRun, Execution, or attributed HumanReview.</p></div></div>
+  <dl class="detail-grid">
+    <div><dt>Source</dt><dd>{{ observation.source_row.sheet_name }}!{{ observation.source_row.source_row_number }}</dd></div>
+    <div><dt>Canonical Question</dt><dd>{% if observation.question %}<a href="{% url 'question-detail' observation.question.stable_id %}">{{ observation.question.stable_id }}</a>{% else %}Unknown / unlinked{% endif %}</dd></div>
+    <div><dt>Legacy judgment</dt><dd>{{ observation.legacy_judgment|default:"Unknown" }} ({{ observation.judgment_source }})</dd></div>
+    <div><dt>Raw Acceptable</dt><dd>{{ observation.acceptable_source_value|default:"Missing" }}</dd></div>
+  </dl>
+  <section class="panel"><h2>Source question</h2><pre>{{ observation.source_question_text }}</pre></section>
+  <section class="panel"><h2>Legacy observed answer</h2><pre>{{ observation.observed_answer_text|default:"No Answer column/value" }}</pre><p>Fidelity: {{ observation.answer_fidelity }}</p></section>
+  <section class="panel"><h2>Legacy expectation / guidance</h2><pre>{{ observation.legacy_expectation|default:"Missing" }}</pre><p>This is not universal ground truth and does not drive PASS/FAIL.</p></section>
+  <section class="panel"><h2>Legacy notes</h2><pre>{{ observation.comments|default:"Missing" }}</pre>{% if observation.secondary_comments %}<pre>{{ observation.secondary_comments }}</pre>{% endif %}</section>
+  {% if observation.experiment_metadata %}<section class="panel"><h2>Source experiment metadata</h2><pre>{{ observation.experiment_metadata }}</pre></section>{% endif %}
+  <section class="panel"><h2>Unknown historical identity</h2><p>{{ observation.unknown_metadata }}</p><p>No target, build, execution/review time, reviewer, bindings, or session identity was fabricated.</p></section>
+{% endblock %}

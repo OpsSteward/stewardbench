@@ -1,8 +1,8 @@
 # Development and deployment
 
-This page documents the implemented M0 foundation and M1 managed catalog. It
-does not imply corpus import, run/execution, target API calls, baseline, review,
-comparison, judge, or adapter-runtime capability.
+This page documents the implemented M0 foundation, M1 managed catalog, and M2
+reconciled corpus import. It does not imply run/execution, target API calls,
+baseline, live review, comparison, judge, or adapter-runtime capability.
 
 ## Runtime and configuration
 
@@ -67,6 +67,38 @@ The Product and Environment examples in the product definition are not loaded
 automatically. Configure them explicitly through the ADMIN UI so initial data
 is visible, reversible, and environment-appropriate. M1 performs no live target
 call.
+
+## Reconciled source corpus
+
+The repository-controlled `StewardBench workbook mapping v1` fixture is
+`import_mappings/v2_dev_troubleshooting_v1.json`. The importer opens
+`docs/reference/v2-dev-troubleshooting.xlsx` without saving it, verifies the
+approved SHA-256, validates all five sheet structures, and produces a
+reconciliation report. The default mode is non-mutating:
+
+```bash
+docker compose run --rm web python manage.py import_stewardbench_workbook --dry-run
+```
+
+Apply requires an existing StewardBench ADMIN and is transactional:
+
+```bash
+docker compose run --rm web python manage.py import_stewardbench_workbook \
+  --apply --actor admin
+```
+
+Use `--path` or `--mapping` for an alternate location and `--json` for a
+machine-readable report. The content must still match the mapping fixture hash;
+the importer never writes the source file. The identity tuple mapping ID,
+mapping version, and source SHA-256 makes an unchanged re-import a reported
+no-op. Existing identical Domains, Tags, and Questions are reused. A conflicting
+stable Question ID or Domain fails apply with `SOURCE_CONFLICT`; manually
+managed content is never overwritten.
+
+Imported Questions remain DRAFT. Corpus import history, source row mappings,
+warnings, and LegacyObservations are visible under **Corpus imports** to both
+authenticated roles. Legacy observations are explicitly not EvaluationRuns,
+Executions, or attributed HumanReviews.
 
 After changing application code, rebuild the image:
 

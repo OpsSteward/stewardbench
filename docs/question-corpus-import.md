@@ -1,13 +1,13 @@
 # Question corpus and import specification
 
-Status: Authoritative mapping approach; workbook structure inspected, with
-source semantics and row-level mappings still requiring explicit review.
+Status: StewardBench workbook mapping v1 approved and implemented for M2.
 
 ## Source availability
 
 The source [v2 development troubleshooting workbook](reference/v2-dev-troubleshooting.xlsx)
-is preserved in the repository. It was inspected read-only on 2026-09-03; it
-was not modified, normalized, transformed, or imported.
+is preserved in the repository. It was inspected without write-back on
+2026-09-03 and imported through M2 without modifying, normalizing, transforming,
+or resaving the source workbook.
 
 Inspection identity:
 
@@ -24,6 +24,54 @@ or question-version time. An implementation must preserve and handle the source
 according to its information-protection classification.
 
 Do not invent absent columns, timestamps, identifiers, groupings, or semantics.
+
+## Approved mapping v1
+
+The repository-controlled interpretation fixture is
+`import_mappings/v2_dev_troubleshooting_v1.json`. It is explicitly approved as
+**StewardBench workbook mapping v1**, has mapping version `1`, and is bound to
+the source SHA-256 above. A future interpretation change requires a new mapping
+version rather than an in-place historical rewrite.
+
+The target-question source workbook uses blank structural separators without
+textual labels. StewardBench workbook mapping v1 therefore supplies the Domain
+taxonomy as an explicit product-owner semantic mapping over the 16 ordered
+source blocks. These names are `PRODUCT_OWNER_MAPPING` provenance; they are not
+source-cell metadata.
+
+| Source rows | Controlled Domain | Code |
+| --- | --- | --- |
+| 2–6 | Service Traversal | `TRAV` |
+| 8–17 | L0 Topology | `L0` |
+| 19–25 | L1 Topology | `L1` |
+| 27–36 | L2 Topology | `L2` |
+| 38–48 | L3 Topology | `L3` |
+| 50–63 | Vera Rubin / Rubin LHN | `RUBIN` |
+| 65–76 | Disjointness | `DISJ` |
+| 78–87 | Capacity and Resource Sharing | `CAP` |
+| 89–104 | Blast Radius | `BLAST` |
+| 106–115 | Power | `POWER` |
+| 117–129 | Temporal / Historical Reasoning | `TEMP` |
+| 131–141 | Root-Cause Analysis | `RCA` |
+| 143–156 | Provenance and Validation | `PROV` |
+| 158–166 | Documentation / RAG / MOPs | `DOC` |
+| 168–182 | Visualization | `VIZ` |
+| 184–202 | Service Profiles and Conversational Follow-ups | `PROFILE` |
+
+Target stable IDs use `<CODE>-NNN`, numbered in source order within each block.
+Rows 155–156 are approved as one `PROV-013` Question with canonical text
+`Which validation findings affect this device, interface, adjacency, service,
+or infrastructure segment?`; both source rows retain provenance. Rows 193–202
+remain standalone `PROFILE` Questions and receive one
+`CONVERSATION_GROUPING_DEFERRED` warning; M2 creates no conversation objects.
+
+The random sheet maps to Domain `Generalization`, code `GEN`, IDs
+`GEN-001`–`GEN-013`, and deterministic tag `generalization`. Its paraphrases and
+Portuguese text remain distinct and exact. The four exact repeated KB/RAG rows
+map to one `KB-001` Question in `Knowledge Base / RAG` and four distinct legacy
+observations. `Interface Issues` is intentionally ignored as issue-tracking
+material and is reported, but no Question, observation, or issue record is
+created from it.
 
 ## Import objectives
 
@@ -48,17 +96,17 @@ formatting.
 
 | Exact sheet name | Exact columns | Meaningful rows | Blank/structural behavior | Initial role |
 | --- | --- | ---: | --- | --- |
-| `known questions` | `Question`, `Answer`, `Expected Answer`, `Acceptable`, `Comments` | 39 data rows, worksheet rows 2–40 | No blank/separator data rows | Secondary Questions plus legacy observations |
+| `known questions` | `Question`, `Answer`, `Expected Answer`, `Acceptable`, `Comments` | 39 data rows, worksheet rows 2–40 | No blank/separator data rows | Unlinked legacy observations unless a separately approved deterministic canonical link exists |
 | `knowledge base - rag questions` | `Question`, `Answer Size`, `Comment`, `Token`, `Total time`, `Acceptable`, `Comments` | 4 data rows, worksheet rows 2–5 | Rows 6–57 and cells H:AD are formatted but blank | One repeated Question plus four legacy experiment records; not a generic parameter model |
 | `Interface Issues` | `Issue`, `Description` | 17 issue rows, worksheet rows 2–18 | No blank/separator data rows | Auxiliary source issue log, not automatically question corpus data |
-| `random question` | `Question`, `Answer`, `Expected Answer`, `Acceptable`, `Comments` | 13 data rows, worksheet rows 2–14 | Rows 15–27 are formatted but blank | Secondary generalization/multilingual Questions plus legacy observations |
-| `target questions` | No header; populated values occur only in unnamed column A | 186 nonblank cells, worksheet rows 2–202 | Row 1 is unused; 15 internal blank rows visually separate 16 unlabeled blocks | Primary canonical Question candidates, subject to row-level review |
+| `random question` | `Question`, `Answer`, `Expected Answer`, `Acceptable`, `Comments` | 13 data rows, worksheet rows 2–14 | Rows 15–27 are formatted but blank | Canonical generalization/multilingual Questions plus legacy observations |
+| `target questions` | No header; populated values occur only in unnamed column A | 186 nonblank cells, worksheet rows 2–202 | Row 1 is unused; 15 internal blank rows visually separate 16 unlabeled blocks | Primary canonical Questions under the approved mapping v1 taxonomy |
 
 All five worksheets are visible. Inspection found no hidden rows or columns,
 merged cells, formulas, or formula-error cells. The internal blank rows in
 `target questions` are 7, 18, 26, 37, 49, 64, 77, 88, 105, 116, 130, 142, 157,
-167, and 183. Because the blocks have no labels or domain column, their visual
-grouping does not prove a taxonomy.
+167, and 183. The workbook cells do not prove or contain a taxonomy; the 16
+Domain labels above are the separately recorded product-owner mapping decision.
 
 ### Column coverage and raw values
 
@@ -77,10 +125,8 @@ grouping does not prove a taxonomy.
 These counts describe source cells, not final Question or LegacyObservation
 counts. In particular, `target questions` rows 155 and 156 contain the two text
 fragments `Which validation findings affect this device, interface, adjacency,
-service,` and `or infrastructure segment?`. They may be one accidentally split
-question, which would explain the blueprint's approximate count of 185, but the
-workbook does not prove that interpretation. Preserve both rows and require an
-explicit mapping decision.
+service,` and `or infrastructure segment?`. Mapping v1 resolves them as one
+accidentally split Question while preserving both raw cells and row identities.
 
 ## Import classification
 
@@ -92,11 +138,13 @@ inspection:
 2. **LEGACY_OBSERVATION** — preserves an observed answer/evidence/timing/
    acceptability record without pretending it is a fully controlled run.
 3. **QUESTION_AND_OBSERVATION** — supplies both a definition and historical
-   evidence, common in `known questions`.
+   evidence, as used by `random question` and the approved KB/RAG mapping.
 4. **STRUCTURAL** — title, heading, blank separator, note, or grouping row kept in
    import provenance but not made executable.
-5. **NEEDS_MANUAL_MAPPING** — ambiguous duplicate, conversation dependency,
-   placeholder, or semantics that cannot be inferred safely.
+5. **NEEDS_MANUAL_MAPPING** — represented in M2 by a structured warning for an
+   ambiguous duplicate, conversation dependency, placeholder, or semantics that
+   cannot be inferred safely; the underlying row is still preserved under one
+   of the roles above.
 
 No row is discarded silently. Structural rows can be omitted from Questions
 while their existence/type remains in the inspection/import report.
@@ -151,10 +199,11 @@ change classification/reason.
 
 ### Stable Question identity
 
-Generate a StewardBench stable ID according to an implementation-time ID policy;
-do not derive permanent identity solely from row number or mutable question
-text. Preserve a source alias such as workbook checksum + sheet + row for
-traceability.
+Mapping v1 assigns target IDs as `<DOMAIN-CODE>-NNN` in approved block order,
+generalization IDs as `GEN-NNN`, and the repeated KB question as `KB-001`.
+These become StewardBench identities and do not derive solely from raw row
+number or mutable question text. Workbook checksum + sheet + row remains
+separate provenance.
 
 Rows across sheets are not automatically the same Question because text matches,
 nor automatically different because wording differs. Deduplication is a review
@@ -175,15 +224,15 @@ use the controlled values.
 ### Domain, tags, rationale
 
 Map a domain only from an identifiable controlled source column or explicit
-manual mapping. Domain is required before activation, not necessarily during
-raw staging. Do not infer it from sheet name without a reviewed mapping rule.
+manual mapping. Mapping v1 uses the approved product-owner taxonomy above for
+the 16 target blocks, `Generalization` for random questions, and `Knowledge Base
+/ RAG` for the shared KB question. Domain is required before activation. Do not
+infer another taxonomy from sheet names or question text.
 
-Use lightweight tags for source-independent cross-cutting traits confirmed by
-content, such as `Portuguese`, `conversation`, `RCA`, `control`, or `canary`.
-Source-sheet membership belongs in provenance and may optionally be a temporary
-import tag only if the product owner finds it useful; it should not become the
-domain taxonomy. Map rationale only from a clearly corresponding field/manual
-decision.
+Mapping v1 creates only the deterministic `generalization` tag. Source-sheet
+membership and conversation candidates belong in provenance/warnings and do
+not become speculative tags. Map rationale only from a clearly corresponding
+field/manual decision; mapping v1 imports no rationale.
 
 ### Observed Answer
 
@@ -201,8 +250,9 @@ to an exact observed response.
 ### Expected Answer
 
 `Expected Answer` occurs only in `known questions` (38 of 39 rows) and `random
-question` (10 of 13 rows). Preserve exact text and identify it as
-`LEGACY_EXPECTATION` or evaluation guidance. The cells mix terse output-shape
+question` (10 of 13 rows). Mapping v1 preserves exact text only as
+`LEGACY_EXPECTATION` on LegacyObservation; it does not populate QuestionVersion
+guidance. The cells mix terse output-shape
 descriptions, historical/dynamic claims, desired behavior, and critique of an
 observed answer. The workbook supplies no scope, freshness, or authority field.
 It is not automatically:
@@ -229,16 +279,16 @@ Preserve the original value exactly. Observed values are:
 The workbook does not define this field, name a reviewer, or record a review
 timestamp. At least some values are conditional or non-binary, and some
 `known questions` rows combine `Yes` with comments that still describe an
-incorrect or unresolved result. Consequently, even apparent affirmative and
-negative values remain raw legacy assessments until a source owner/admin
-approves a mapping rule. Do not automatically translate them to StewardBench
-GOOD/BAD.
+incorrect or unresolved result. Mapping v1 now supplies the approved narrow
+rule: exact `Yes` maps to legacy `GOOD`; exact `No` and `NO` map to legacy
+`BAD`. Blank, `Partially`, `Partialy.`, and `Yes for now. ` remain unknown.
+Every original cell value is retained. These values are legacy evidence only;
+they do not create PASS/FAIL or future live HumanReviews.
 
-Create a canonical historical HumanReview only if source evidence supplies (or
-an explicitly approved legacy-import rule can honestly represent) the reviewer
-and review time required by that entity. Otherwise the assessment remains on
-LegacyObservation with unknown original attribution; the importing admin is not
-fabricated as the historical reviewer.
+No canonical historical HumanReview is created because the source supplies no
+reviewer or review time. The assessment remains on LegacyObservation with
+`IMPORTED_LEGACY` source and unknown original attribution; the importing admin
+is not fabricated as the historical reviewer.
 
 Because these are imported manual decisions, label their source and do not imply
 the full controlled conditions of a StewardBench execution. Do not translate
@@ -282,36 +332,37 @@ narrow versioned request context during implementation/product review.
 
 ### `target questions`
 
-- Treat the 186 nonblank column-A cells as primary canonical Question
-  candidates pending row-level review. There is no header or explicit ID/domain.
+- Map the 186 nonblank column-A cells to 185 canonical Questions under the
+  approved 16-block taxonomy. There is no workbook header, explicit ID, or
+  Domain cell; IDs and Domains come from mapping v1.
 - Treat the 15 internal blank separator rows as STRUCTURAL, not empty Questions;
-  retain their row positions without assigning meaning to the unlabeled blocks.
-- Keep rows 155 and 156 as NEEDS_MANUAL_MAPPING until a reviewer decides whether
-  they are one split question or two source rows.
-- Preserve source order for migration review but do not make order permanent
-  question identity or priority.
-- Identify placeholders and binding needs manually/programmatically; fixed
-  canary/admin values are valid v1 mappings.
-- Any adjacent follow-up wording that depends on earlier turns is flagged for
-  conversation review rather than assumed standalone.
+  retain their row positions and report that the Domain labels are
+  product-owner-supplied rather than blank-cell values.
+- Merge rows 155 and 156 into `PROV-013`, preserving both row/cell records.
+- Preserve source order in provenance. Numbering within the approved blocks
+  establishes stable v1 IDs; later workbook row movement does not rename them.
+- Warn on approved lexical placeholder candidates but create no inferred
+  BindingDefinitions.
+- Import rows 193–202 as standalone `PROFILE` Questions and record
+  `CONVERSATION_GROUPING_DEFERRED`; create no conversation grouping in M2.
 
 ### `known questions`
 
-For each of the 39 data rows, seed/link a Question and QuestionVersion from
-`Question`. Preserve `Answer` as a LegacyObservation value/description,
-`Expected Answer` as legacy guidance, `Acceptable` as an unmapped raw legacy
-assessment pending an approved interpretation, and `Comments` with their
-apparent scope. It becomes a historical HumanReview only under the attribution
-rule above. Missing target/build/binding/time remains unknown.
+For each of the 39 data rows, create an unlinked LegacyObservation. Preserve
+`Question` as source question text, `Answer` as a value/description, `Expected
+Answer` as legacy guidance, raw and narrowly normalized `Acceptable`, and
+`Comments` with their apparent scope. Mapping v1 does not create Questions from
+this sheet or guess cross-sheet canonical links. Missing
+target/build/binding/time/reviewer identity remains explicitly unknown.
 
 This sheet most closely resembles StewardBench's review loop but must not define
 the platform's architecture or turn its Expected Answer column into an oracle.
 
 ### `random question`
 
-Import the 13 substantive questions as normal executable Questions. Preserve
-paraphrase and multilingual wording exactly and use reviewed lightweight tags
-such as `Portuguese` or `generalization` where helpful. Row 7 is the only
+Import the 13 substantive questions as DRAFT canonical Questions in
+`Generalization`, with IDs `GEN-001`–`GEN-013` and tag `generalization`.
+Preserve paraphrase and multilingual wording exactly. Row 7 is the only
 explicitly Portuguese question found: `Quantos transceivers no total estão em
 uso?` Row 8 is a related English question but is not proven to be an exact
 translation. v1 does not generate random questions automatically.
@@ -323,11 +374,10 @@ intended meaning seems similar: their wording is part of what they evaluate.
 ### `knowledge base - rag questions`
 
 The four data rows contain one exact repeated question with four different
-answer-size settings. Identify one candidate executable question definition
-without discarding any row. The settings, token counts, timing, acceptability,
-and two comment fields may become four separate LegacyObservations linked to the
-QuestionVersion when that link is approved. No exact answer is available in
-this sheet.
+answer-size settings. Mapping v1 creates one DRAFT `KB-001` Question and four
+LegacyObservations linked to its initial QuestionVersion. The settings, token
+counts, timing, acceptability, and two comment fields remain distinct. No exact
+answer is available in this sheet.
 
 Preserve experimental context exactly. Standard v1 execution remains a
 question/answer workflow; do not generalize this sheet into arbitrary experiment
@@ -335,13 +385,10 @@ configuration before direct corpus/API evidence requires it.
 
 ### `Interface Issues`
 
-Treat all 17 rows as an auxiliary issue log, not automatically as Question
-definitions or controlled Executions. Descriptions mention evaluated questions,
-UI behavior, authentication, knowledge-base uploads, product configuration, and
-occasionally timing/token observations in prose. Preserve sheet/row provenance
-if these notes are retained with the import batch. Create links to question or
-legacy-observation records only through explicit review; quoted question text
-inside a description is not itself a corpus row.
+Mapping v1 intentionally excludes all 17 rows as an auxiliary issue log. They
+are counted with the ignored reason in the reconciliation report and workbook
+inventory, but create no Question, LegacyObservation, issue, or source-row
+record. Quoted question text inside a description is not itself a corpus row.
 
 Issue row 2 supplies useful context for the duplicate `known questions` rows 32
 and 33: it states that accumulated `Recent Questions` caused an apparent empty
@@ -390,14 +437,10 @@ illustrates a six-turn Rubin conversation using questions represented at target
 rows 187, 190, and 193–196, but it does not settle how every workbook row should
 be grouped.
 
-If an approved mapping identifies scenario and turn order, create/link one
-Question of kind CONVERSATION, an exact QuestionVersion, a ConversationScenario,
-and ordered ConversationTurns. Preserve all source rows.
-
-If grouping depends on interpretation of pronouns, adjacency, blank rows, or
-answer context, classify the rows NEEDS_MANUAL_MAPPING. Do not import dependent
-follow-ups as unrelated standalone Questions and do not guess grouping/session
-semantics.
+Mapping v1 intentionally keeps rows 193–202 as standalone canonical Questions
+and records `CONVERSATION_GROUPING_DEFERRED` for the whole range. It does not
+assert membership, order, parentage, or session semantics. M8 may add scenario
+membership without changing these M2 stable Question identities.
 
 ## Variables and resolved bindings
 
@@ -425,23 +468,38 @@ and final submitted question.
 
 ## Import workflow
 
-1. Open the preserved workbook read-only and verify its checksum against the
-   inspected source identity.
+1. Open the preserved workbook without write-back and verify its checksum
+   against the inspected source identity.
 2. Programmatically inventory sheets, dimensions, hidden content, merged cells,
    formulas, headers, types, and non-blank row counts without modifying it.
 3. Produce a mapping report containing every source row classification,
    candidate duplicate, placeholder, ambiguity, and proposed domain/tag.
-4. Have an admin review manual mappings, especially duplicates, Acceptable
-   semantics, conversations, placeholders, and domains.
+4. Load the approved, repository-controlled mapping v1 decisions; unresolved
+   duplicates, conversations, and placeholders remain warnings.
 5. Import into a transactionally identifiable batch with idempotency based on
    source checksum + mapping version; never duplicate silently on rerun.
 6. Validate counts and sample raw values against the workbook.
-7. Keep imported Questions DRAFT until required domains, versions, bindings, and
-   obvious mappings are reviewed; activate explicitly.
+7. Keep imported Questions DRAFT until an ADMIN reviews and explicitly activates
+   them; import never implies activation.
 8. Display legacy observations separately from controlled StewardBench history.
 
-The importer itself is future implementation work and is not part of this
-documentation session.
+The implemented management command defaults to a non-mutating reconciliation:
+
+```bash
+python manage.py import_stewardbench_workbook --dry-run
+```
+
+An apply requires an existing ADMIN username and is transactional:
+
+```bash
+python manage.py import_stewardbench_workbook --apply --actor admin
+```
+
+`--path`, `--mapping`, and `--json` support explicit source/configuration paths
+and machine-readable evidence. Apply fails on a source hash/structure mismatch
+or conflicting manually managed Domain/Question and never partially overwrites
+the catalog. An unchanged source hash + mapping identity/version reuses the one
+immutable LegacyImportBatch and is a reported no-op.
 
 ## Import validation report
 
@@ -462,22 +520,59 @@ Before acceptance, report per sheet and total:
 Reconcile generated records back to source sheet/row samples. No successful
 import should have unreported dropped substantive rows.
 
-## Remaining mapping decisions
+## Mapping v1 reconciliation
 
-Structural inspection is complete for this source version. Source-owner/admin
-review must still decide or supply evidence for:
+The approved workbook deterministically reconciles to 344 physical rows: 259
+meaningful rows, four header rows, and 81 blank/separator rows. Of the meaningful
+rows, all 17 `Interface Issues` rows are reported as intentionally ignored. M2
+persists 257 source-row records (242 imported substantive rows plus 15 target
+separators) and 489 mapped source-cell records.
 
-- `Acceptable` semantics, reviewer attribution, and review time;
-- whether `Answer` cells are summaries or exact product output on each row;
-- the meaning/unit and clock boundary of `Token` and `Total time`;
-- whether target rows 155–156 form one question;
-- explicit conversation membership and turn order;
-- formal variable declarations and concrete binding/resolver policy;
-- controlled domains and optional tags for target-sheet blocks;
-- relationships, if any, between repeated/paraphrased/cross-sheet questions;
-- treatment of `Interface Issues` beyond preserved auxiliary provenance; and
-- historical target, build, execution time, and runtime context, which have no
-  dedicated workbook fields.
+| Domain | Source rows | Meaningful cells | Merge | Questions | ID range |
+| --- | --- | ---: | ---: | ---: | --- |
+| Service Traversal | 2–6 | 5 | 0 | 5 | `TRAV-001`…`TRAV-005` |
+| L0 Topology | 8–17 | 10 | 0 | 10 | `L0-001`…`L0-010` |
+| L1 Topology | 19–25 | 7 | 0 | 7 | `L1-001`…`L1-007` |
+| L2 Topology | 27–36 | 10 | 0 | 10 | `L2-001`…`L2-010` |
+| L3 Topology | 38–48 | 11 | 0 | 11 | `L3-001`…`L3-011` |
+| Vera Rubin / Rubin LHN | 50–63 | 14 | 0 | 14 | `RUBIN-001`…`RUBIN-014` |
+| Disjointness | 65–76 | 12 | 0 | 12 | `DISJ-001`…`DISJ-012` |
+| Capacity and Resource Sharing | 78–87 | 10 | 0 | 10 | `CAP-001`…`CAP-010` |
+| Blast Radius | 89–104 | 16 | 0 | 16 | `BLAST-001`…`BLAST-016` |
+| Power | 106–115 | 10 | 0 | 10 | `POWER-001`…`POWER-010` |
+| Temporal / Historical Reasoning | 117–129 | 13 | 0 | 13 | `TEMP-001`…`TEMP-013` |
+| Root-Cause Analysis | 131–141 | 11 | 0 | 11 | `RCA-001`…`RCA-011` |
+| Provenance and Validation | 143–156 | 14 | 1 | 13 | `PROV-001`…`PROV-013` |
+| Documentation / RAG / MOPs | 158–166 | 9 | 0 | 9 | `DOC-001`…`DOC-009` |
+| Visualization | 168–182 | 15 | 0 | 15 | `VIZ-001`…`VIZ-015` |
+| Service Profiles and Conversational Follow-ups | 184–202 | 19 | 0 | 19 | `PROFILE-001`…`PROFILE-019` |
 
-These ambiguities are not reasons to invent a broader domain model or convert
-legacy material into controlled StewardBench history.
+The resulting imported catalog has 199 DRAFT Questions and initial
+QuestionVersions: 185 target, 13 generalization, and one KB/RAG. It creates or
+reuses 18 controlled Domains and one `generalization` Tag. It creates zero
+BindingDefinitions and zero HistoricalFixtures. The 56 LegacyObservations are
+39 known, 13 random, and four KB/RAG observations. Exact Yes/No normalization
+produces 25 `GOOD`, 27 `BAD`, and four unknown legacy judgments.
+
+Mapping v1 currently emits 62 deterministic warning records: 53 potential
+binding reviews, four ambiguous canonical links, three sheet-level unknown
+legacy-metadata notices, one deferred-conversation range, and one unsupported
+KB token/time semantics notice.
+
+## Remaining source limitations
+
+No unresolved product-owner decision blocks M2. These source limitations remain
+deliberately unknown or deferred rather than guessed:
+
+- whether each `Answer` cell is exact raw output or a manual representation;
+- reviewer attribution and review time;
+- `Token` meaning and `Total time` unit/clock boundary;
+- final M8 conversation membership and turn order;
+- formal variable declarations and binding/resolver policy;
+- semantic relationships between repeated/paraphrased/cross-sheet questions;
+  and
+- historical product, target, environment, build, execution time, bindings, and
+  session identity.
+
+These limitations do not justify a broader domain model or conversion of legacy
+material into controlled StewardBench execution history.

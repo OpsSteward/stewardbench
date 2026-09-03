@@ -24,6 +24,7 @@
           <a class="nav-link" href="{% url 'domain-list' %}">Domains</a>
           <a class="nav-link" href="{% url 'tag-list' %}">Tags</a>
           <a class="nav-link" href="{% url 'fixture-list' %}">Historical fixtures</a>
+          <a class="nav-link" href="{% url 'import-batch-list' %}">Corpus imports</a>
           {% if user.is_stewardbench_admin %}
             <a class="nav-link" href="{% url 'user-list' %}">Users</a>
           {% endif %}

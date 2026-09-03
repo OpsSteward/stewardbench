@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Import batch {{ batch.pk }} · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'dashboard' %}">Dashboard</a> / <a href="{% url 'import-batch-list' %}">Corpus imports</a> / {{ batch.pk }}</p>{% endblock %}
+{% block content %}
+  <div class="page-header"><div><h1>{{ batch.mapping_name }} v{{ batch.mapping_version }}</h1><p>Immutable import batch {{ batch.pk }}</p></div></div>
+  <dl class="detail-grid">
+    <div><dt>Source file</dt><dd>{{ batch.source_filename }}</dd></div>
+    <div><dt>SHA-256</dt><dd><code>{{ batch.source_sha256 }}</code></dd></div>
+    <div><dt>Importer</dt><dd>{{ batch.importer_version }}</dd></div>
+    <div><dt>Imported</dt><dd>{{ batch.imported_at }} by {{ batch.imported_by.username }}</dd></div>
+  </dl>
+  <section class="panel">
+    <h2>Interpretation boundary</h2>
+    <p>The target-question Domain taxonomy is a product-owner semantic mapping over blank-separated source blocks. The Domain labels are not workbook cell values.</p>
+  </section>
+  <section class="panel">
+    <h2>Target Domain mapping</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Rows</th><th>Domain</th><th>Code</th><th>Interpretation source</th></tr></thead>
+      <tbody>{% for domain in domain_mappings %}<tr><td>{{ domain.start_row }}–{{ domain.end_row }}</td><td>{{ domain.name }}</td><td><code>{{ domain.code }}</code></td><td>PRODUCT_OWNER_MAPPING</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  <section class="panel">
+    <h2>Warnings ({{ warnings|length }})</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Code</th><th>Sheet</th><th>Rows</th><th>Explanation</th></tr></thead>
+      <tbody>{% for warning in warnings %}<tr><td>{{ warning.code }}</td><td>{{ warning.sheet_name }}</td><td>{{ warning.source_rows }}</td><td>{{ warning.explanation }}</td></tr>{% empty %}<tr><td colspan="4">No warnings.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  <section class="panel">
+    <h2>Legacy observations ({{ observations|length }})</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Source</th><th>Question</th><th>Legacy judgment</th><th>Canonical link</th></tr></thead>
+      <tbody>{% for observation in observations %}<tr><td><a href="{% url 'legacy-observation-detail' observation.pk %}">{{ observation.source_row.sheet_name }}!{{ observation.source_row.source_row_number }}</a></td><td>{{ observation.source_question_text }}</td><td>{{ observation.legacy_judgment|default:"Unknown" }}</td><td>{% if observation.question %}<a href="{% url 'question-detail' observation.question.stable_id %}">{{ observation.question.stable_id }}</a>{% else %}Unlinked{% endif %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  <section class="panel">
+    <h2>Source-row provenance</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Sheet</th><th>Row</th><th>Classification</th><th>Domain</th><th>Question</th></tr></thead>
+      <tbody>{% for row in page %}<tr><td>{{ row.sheet_name }}</td><td>{{ row.source_row_number }}</td><td>{{ row.classification }}</td><td>{{ row.domain|default:"—" }}</td><td>{% if row.question %}<a href="{% url 'question-detail' row.question.stable_id %}">{{ row.question.stable_id }}</a>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Previous</a>{% endif %}
+    <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a href="?page={{ page.next_page_number }}">Next</a>{% endif %}
+  </section>
+{% endblock %}
