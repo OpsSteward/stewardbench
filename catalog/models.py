@@ -385,6 +385,14 @@ class BindingDefinition(AttributedModel):
     value_type = models.CharField(max_length=16, choices=ValueType.choices)
     is_required = models.BooleanField(default=True)
     description = models.TextField(blank=True)
+    fixed_value = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Optional non-secret M3 fixed/admin value. It is substituted only "
+            "for the exact {{binding_name}} placeholder."
+        ),
+    )
 
     class Meta:
         ordering = ("name",)

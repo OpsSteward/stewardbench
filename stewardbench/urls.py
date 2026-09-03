@@ -19,5 +19,6 @@ urlpatterns = [
     path("health/ready/", core_views.readiness, name="health-ready"),
     path("users/", include("accounts.urls")),
     path("catalog/", include("catalog.urls")),
+    path("", include("evaluations.urls")),
     path("corpus-imports/", include("corpus.urls")),
 ]

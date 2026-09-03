@@ -132,6 +132,6 @@ test "$denied_status" = "403"
 vendor=$("${compose[@]}" exec -T web python manage.py shell -c 'from django.db import connection; print(connection.vendor)' | tail -n 1)
 test "$vendor" = "postgresql"
 "${compose[@]}" exec -T web sh -c '! find /app -name "*.sqlite3" -print -quit | grep -q .'
-"${compose[@]}" logs --no-color worker | grep -q 'Worker foundation ready'
+"${compose[@]}" logs --no-color worker | grep -Eq 'Worker foundation ready|M3 sequential worker ready'
 
 printf 'M0 Docker smoke PASS: PostgreSQL, migrations, bootstrap, ADMIN/OPERATOR login, restart persistence, RBAC denial, and worker readiness.\n'

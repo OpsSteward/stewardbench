@@ -74,6 +74,7 @@ def _binding_values(formset):
             "value_type": row["value_type"],
             "is_required": row["is_required"],
             "description": row["description"],
+            "fixed_value": row.get("fixed_value"),
         }
         for row in formset.cleaned_data
         if row and row.get("name") and not row.get("DELETE")
@@ -540,7 +541,7 @@ def question_version_create(request, stable_id):
     if current:
         binding_initial = list(
             current.binding_definitions.values(
-                "name", "value_type", "is_required", "description"
+                "name", "value_type", "is_required", "description", "fixed_value"
             )
         )
     binding_formset = BindingDefinitionFormSet(

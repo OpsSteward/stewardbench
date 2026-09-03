@@ -14,6 +14,8 @@ COPY pyproject.toml README.md ./
 COPY accounts ./accounts
 COPY catalog ./catalog
 COPY corpus ./corpus
+COPY evaluations ./evaluations
+COPY harness ./harness
 COPY core ./core
 COPY import_mappings ./import_mappings
 COPY docs/reference/v2-dev-troubleshooting.xlsx /app/docs/reference/v2-dev-troubleshooting.xlsx

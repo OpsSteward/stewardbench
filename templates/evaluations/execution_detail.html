@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Execution {{ execution.id }} · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'run-detail' execution.run_id %}">Run {{ execution.run_id }}</a> / Execution {{ execution.question_order }}</p>{% endblock %}
+{% block content %}
+<header class="page-header"><h1>Execution {{ execution.question_stable_id }} · v{{ execution.question_version_number }}</h1><p>Captured product interaction. {{ execution.outcome }} is an execution outcome, not an answer-quality judgment.</p></header>
+<section class="panel stack">
+  <div class="detail-grid"><div><dt>Outcome</dt><dd><span class="badge">{{ execution.outcome }}</span></dd></div><div><dt>Target revision</dt><dd>{{ execution.target_snapshot.target_display_name }} r{{ execution.target_revision.revision_number }}</dd></div><div><dt>Request correlation</dt><dd>{{ execution.request_correlation_id }}</dd></div><div><dt>Started / completed</dt><dd>{{ execution.started_at|default:"—" }}<br>{{ execution.completed_at|default:"—" }}</dd></div><div><dt>Latency</dt><dd>{% if execution.latency_ms is not None %}{{ execution.latency_ms }} ms{% else %}—{% endif %}</dd></div><div><dt>Build metadata</dt><dd>{{ execution.build_snapshot.get_runtime_state_display }}{% if execution.build_snapshot.runtime_metadata.product_version %}: {{ execution.build_snapshot.runtime_metadata.product_version }}{% endif %}</dd></div></div>
+  <div><h2>Exact QuestionVersion template</h2><pre class="pre-wrap">{{ execution.question_template }}</pre></div>
+  <div><h2>Concrete submitted question</h2><pre class="pre-wrap">{{ execution.submitted_question }}</pre></div>
+  <div><h2>Resolved bindings</h2>{% if execution.resolved_bindings.all %}<ul>{% for binding in execution.resolved_bindings.all %}<li><code>{{ binding.name }}</code> = <span class="pre-wrap">{{ binding.display_value }}</span> ({{ binding.resolution_mode }})</li>{% endfor %}</ul>{% else %}<p class="muted">No bindings were declared for this QuestionVersion.</p>{% endif %}</div>
+  <div><h2>Normalized/display answer</h2>{% if execution.display_answer %}<pre class="pre-wrap">{{ execution.display_answer }}</pre>{% else %}<p class="muted">No complete answer was captured.</p>{% endif %}</div>
+  {% if execution.error_class %}<div class="error"><h2>Execution diagnostic: {{ execution.error_class }}</h2><p>{{ execution.error_detail }}</p></div>{% endif %}
+  <details><summary>Raw request (sanitized)</summary><pre class="pre-wrap">{{ execution.raw_request }}</pre></details>
+  <details><summary>Raw target response</summary><pre class="pre-wrap">{{ execution.raw_response|default:"No target response captured." }}</pre></details>
+  <details><summary>Evidence and response metadata</summary><pre class="pre-wrap">{{ execution.evidence }}
+{{ execution.response_metadata }}</pre></details>
+  <details><summary>Target/build snapshots</summary><pre class="pre-wrap">Endpoint: {{ execution.target_snapshot.endpoint }}
+Declared product version: {{ execution.build_snapshot.declared_product_version|default:"Unknown" }}
+Declared build ID: {{ execution.build_snapshot.declared_build_id|default:"Unknown" }}
+Declared git SHA: {{ execution.build_snapshot.declared_git_sha|default:"Unknown" }}
+Runtime metadata: {{ execution.build_snapshot.runtime_metadata }}</pre></details>
+</section>
+{% endblock %}

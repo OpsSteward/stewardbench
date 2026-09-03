@@ -12,7 +12,7 @@
   <section class="panel"><h2>Binding requirements</h2><p class="muted">Declare variable names and expected value shapes only. Do not enter answer-oracle or credential values.</p>
     {{ binding_formset.management_form }}
     {% if binding_formset.non_form_errors %}<div class="error">{{ binding_formset.non_form_errors }}</div>{% endif %}
-    <div class="table-wrap"><table><thead><tr><th>Name</th><th>Value shape</th><th>Required</th><th>Description</th><th>Remove</th></tr></thead><tbody>{% for binding in binding_formset %}<tr><td>{{ binding.name }}{{ binding.name.errors }}</td><td>{{ binding.value_type }}{{ binding.value_type.errors }}</td><td>{{ binding.is_required }}</td><td>{{ binding.description }}{{ binding.description.errors }}</td><td>{{ binding.DELETE }}</td></tr>{% endfor %}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Name</th><th>Value shape</th><th>Required</th><th>Description</th><th>Fixed M3 value</th><th>Remove</th></tr></thead><tbody>{% for binding in binding_formset %}<tr><td>{{ binding.name }}{{ binding.name.errors }}</td><td>{{ binding.value_type }}{{ binding.value_type.errors }}</td><td>{{ binding.is_required }}</td><td>{{ binding.description }}{{ binding.description.errors }}</td><td>{{ binding.fixed_value }}{{ binding.fixed_value.errors }}</td><td>{{ binding.DELETE }}</td></tr>{% endfor %}</tbody></table></div>
     <div class="actions"><button class="button primary" type="submit">Save</button><a class="button" href="{% url 'question-list' %}">Cancel</a></div>
   </section>
 </form>

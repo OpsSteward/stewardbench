@@ -6,12 +6,14 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection
 
+from evaluations.services import process_next_execution, recover_interrupted_executions
+
 
 logger = logging.getLogger("stewardbench.worker")
 
 
 class Command(BaseCommand):
-    help = "Run the PostgreSQL-connected idle worker foundation."
+    help = "Run the M3 sequential PostgreSQL-backed evaluation worker."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true", help="Check readiness and exit.")
@@ -27,15 +29,18 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, stop)
 
         self._check_database()
-        logger.info("Worker foundation ready; evaluation dispatch begins in a later milestone.")
+        recovered = recover_interrupted_executions()
+        logger.info("M3 sequential worker ready; marked %s interrupted execution(s) ambiguous.", recovered)
         if options["once"]:
+            process_next_execution()
             return
 
         while not stopping:
-            time.sleep(settings.WORKER_POLL_SECONDS)
+            if not process_next_execution():
+                time.sleep(settings.WORKER_POLL_SECONDS)
             self._check_database()
 
-        logger.info("Worker foundation stopped.")
+        logger.info("M3 sequential worker stopped.")
 
     @staticmethod
     def _check_database():

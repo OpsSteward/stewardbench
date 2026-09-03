@@ -1,8 +1,9 @@
 # Development and deployment
 
-This page documents the implemented M0 foundation, M1 managed catalog, and M2
-reconciled corpus import. It does not imply run/execution, target API calls,
-baseline, live review, comparison, judge, or adapter-runtime capability.
+This page documents the implemented M0 foundation, M1 managed catalog, M2
+reconciled corpus import, and the bounded M3 durable execution slice. M3 does
+not imply human review, retries/reruns, baselines, comparison, conversations,
+parallel execution, or real OpsSteward wire-contract certification.
 
 ## Runtime and configuration
 
@@ -33,11 +34,12 @@ for the deployed HTTPS origin. Never put `.env` into an image or commit it.
 - `worker`: the same image running `python manage.py run_worker`; and
 - `db`: PostgreSQL 17.11 with the named `postgres_data` volume.
 
-The foundation worker connects to PostgreSQL, logs one readiness message, and
-stays alive with a bounded idle loop. It has no job table, claim logic, target call,
-or evaluation semantics. Those belong to later milestones. Both application
-services wait for PostgreSQL health. Migrations remain an explicit one-shot
-operation and never run implicitly in web or worker startup.
+The worker performs M3 sequential durable execution. A browser request creates
+the complete Run/Execution manifest in PostgreSQL and returns; the worker later
+processes one pending Execution at a time. It never holds a database transaction
+across a target call. Both application services wait for PostgreSQL health.
+Migrations remain an explicit one-shot operation and never run implicitly in
+web or worker startup.
 
 ## Managed catalog
 
@@ -63,10 +65,78 @@ endpoint form rejects user information, query parameters, and fragments, and
 fixture fixed-parameter keys reject credential-shaped names. Never put usable
 credentials into catalog records.
 
+## M3 durable evaluation
+
+An ADMIN activates one or more single-turn Questions, selects them from
+**Questions**, chooses one target, and creates a **Sequential** run. `Select all
+matching` is resolved at launch to all currently filtered eligible `ACTIVE`
+single-turn Questions, never merely the current page and never future catalog
+records. DRAFT, RETIRED, and conversation Questions are not M3 launch-eligible.
+OPERATOR may browse Runs and Executions but cannot launch one through either the
+UI or a direct POST.
+
+At launch the application snapshots the target revision endpoint, adapter and
+policy, declared build metadata, exact QuestionVersion ID/text, exact concrete
+submitted question, resolved fixed bindings, and deterministic manifest order.
+The worker uses those frozen rows rather than rereading a current QuestionVersion
+or TargetRevision. A later catalog revision therefore cannot change a launched
+Run.
+
+M3 supports an optional non-secret fixed/admin value on a BindingDefinition.
+It substitutes only the explicit `{{binding_name}}` marker. A required binding
+without a fixed value, or a configured marker absent from the template, creates
+an Execution `ERROR` with `BINDING_CONFIGURATION_ERROR` and sends no target
+request. M3 deliberately has no dynamic resolver.
+
+The only executable M3 target wire contract is the reusable deterministic
+`fake-http` adapter. It sends `POST <endpoint>/question` with an immutable
+request correlation UUID and accepts only a complete JSON envelope containing
+`complete: true` and a string `answer`. Its optional `GET <endpoint>/metadata`
+lookup is non-fatal: declared launch values and runtime-discovered metadata are
+retained separately, with unknown/unavailable state shown explicitly. Exact
+OpsSteward v1/v2 question and metadata routes remain an integration open item;
+no route or schema is guessed or hard-coded.
+
+For a TargetRevision with a non-empty credential reference, the runtime worker
+resolves it only from an environment variable named
+`STEWARD_BENCH_TARGET_CREDENTIAL_<REFERENCE>`, where non-alphanumeric
+characters in the symbolic reference become `_` and letters are uppercased.
+For example, `secrets/m3-fake` resolves from
+`STEWARD_BENCH_TARGET_CREDENTIAL_SECRETS_M3_FAKE`. The value is injected into
+the outgoing Authorization header but is omitted/redacted before raw request,
+response, metadata, diagnostic, and UI persistence. A missing value becomes an
+explicit `AUTHENTICATION_FAILED` Execution error.
+
+The standard-library fake service is reusable by adapter, worker, and later
+Docker tests:
+
+```bash
+python -m harness.fake_target --port 18081 --control-token synthetic-control-token
+```
+
+It defaults to loopback. For a disposable isolated Docker test network only,
+pass `--host 0.0.0.0` so the separately packaged worker can reach it; retain a
+per-run synthetic control token and do not publish that port outside the test
+network. The control token protects configuration/reset/journal endpoints. Its
+append-only journal records request correlation, concrete submitted question,
+request fingerprint, timestamps, mode, and observed concurrency independently
+of StewardBench. It supports
+complete Unicode answers, delays/timeouts, HTTP/auth errors,
+malformed/incomplete/wrong-content-type responses, unsafe HTML, and metadata
+available/unavailable/malformed modes.
+
+M3 restart behavior is intentionally conservative pending M4 claim/lease
+work: terminal Executions remain untouched. On worker start, a persisted
+`RUNNING` Execution is finalized as `ERROR` with
+`AMBIGUOUS_INFRASTRUCTURE`; it is never silently submitted again because M3
+cannot prove whether the target accepted it. M4 owns safe reclaim, multi-worker
+claims, leases, heartbeats, and parallel dispatch.
+
 The Product and Environment examples in the product definition are not loaded
 automatically. Configure them explicitly through the ADMIN UI so initial data
-is visible, reversible, and environment-appropriate. M1 performs no live target
-call.
+is visible, reversible, and environment-appropriate. Catalog configuration
+itself performs no target call; only the separate M3 worker performs a frozen
+Run through its configured adapter.
 
 ## Reconciled source corpus
 
@@ -189,6 +259,25 @@ SQLite database exists. The disposable project and volume are removed on exit.
 
 Set `STEWARD_SMOKE_PROJECT` or `STEWARD_SMOKE_PORT` only when the defaults
 conflict with another local resource.
+
+### Rootless Docker fallback
+
+If the normal host Docker socket is intentionally inaccessible, invoke the
+already-provisioned isolated rootless daemon rather than changing host group
+membership or using `sudo`. Point the Docker client at that daemon's private
+runtime socket, confirm it is rootless, then use the ordinary Compose and smoke
+commands:
+
+```bash
+export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/<isolated-rootless-daemon>.sock"
+docker version
+docker info --format '{{.SecurityOptions}}'
+./scripts/smoke_m0.sh
+```
+
+Use a uniquely named disposable Compose project for concurrent acceptance
+work. Do not publish fake-target control ports outside that isolated test
+network.
 
 ## Static assets and logs
 

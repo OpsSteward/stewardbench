@@ -149,15 +149,24 @@ class BindingDefinitionInputForm(forms.Form):
     )
     is_required = forms.BooleanField(required=False, initial=True)
     description = forms.CharField(widget=forms.Textarea, required=False)
+    fixed_value = forms.JSONField(
+        required=False,
+        help_text="Optional non-secret fixed value used for {{binding_name}} in M3.",
+    )
 
     def clean(self):
         cleaned = super().clean()
         if cleaned.get("name") and not cleaned.get("value_type"):
             self.add_error("value_type", "Choose the expected value shape.")
         if not cleaned.get("name") and any(
-            cleaned.get(field) for field in ("value_type", "description")
+            cleaned.get(field) for field in ("value_type", "description", "fixed_value")
         ):
             self.add_error("name", "Enter a binding name or clear the row.")
+        if cleaned.get("name") and any(
+            fragment in cleaned["name"].casefold()
+            for fragment in ("password", "secret", "token", "authorization", "cookie")
+        ):
+            self.add_error("name", "Binding names cannot be credential-shaped.")
         return cleaned
 
 
