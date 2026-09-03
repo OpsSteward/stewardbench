@@ -7,6 +7,7 @@ PostgreSQL transactions; adapter calls are deliberately outside them.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import threading
@@ -28,8 +29,14 @@ from catalog.models import EvaluationTarget, Question, TargetRevision
 
 from .adapters import AdapterFailure, TargetTimeout, adapter_for, resolve_credential
 from .models import (
+    Baseline,
+    BaselineAttentionEvent,
+    BaselineMembership,
+    BaselineStateEvent,
     BuildSnapshot,
     Comment,
+    Comparison,
+    ComparisonItem,
     EvaluationRun,
     Execution,
     ExecutionValidityDecision,
@@ -291,6 +298,389 @@ def run_review_metrics(run: EvaluationRun) -> dict[str, int]:
     }
 
 
+def baseline_completeness(baseline: Baseline) -> dict[str, int]:
+    """Current review/validity projection across a fixed baseline membership.
+
+    The population is fixed at promotion.  Later review or validity events may
+    change the displayed current projection, but can never add, remove, or
+    replace a member.
+    """
+
+    executions = Execution.objects.filter(baseline_memberships__baseline=baseline)
+    total = executions.count()
+    reviewed = executions.filter(current_human_review__isnull=False).count()
+    return {
+        "total": total,
+        "valid": executions.filter(validity=Execution.Validity.VALID).count(),
+        "invalid": executions.filter(validity=Execution.Validity.INVALID).count(),
+        "human_reviewed": reviewed,
+        "unreviewed": total - reviewed,
+        "good": executions.filter(current_human_review__judgment=HumanReview.Judgment.GOOD).count(),
+        "bad": executions.filter(current_human_review__judgment=HumanReview.Judgment.BAD).count(),
+        "success": executions.filter(outcome=Execution.Outcome.SUCCESS).count(),
+        "error": executions.filter(outcome=Execution.Outcome.ERROR).count(),
+        "timeout": executions.filter(outcome=Execution.Outcome.TIMEOUT).count(),
+    }
+
+
+@transaction.atomic
+def create_baseline(*, actor, source_run: EvaluationRun, name: str, description: str = "", is_active=True):
+    """Promote a terminal Run without treating its answers as ground truth."""
+
+    require_admin(actor)
+    clean_name = str(name).strip()
+    if not clean_name:
+        raise ValidationError("A baseline name is required.")
+    locked_run = (
+        EvaluationRun.objects.select_for_update()
+        .select_related("target", "target__product", "target__environment")
+        .get(pk=source_run.pk)
+    )
+    if not locked_run.is_terminal:
+        raise ValidationError("Only a completed EvaluationRun can be promoted to a Baseline.")
+    source_executions = list(locked_run.executions.order_by("question_order"))
+    if not source_executions:
+        raise ValidationError("A Baseline requires at least one captured Execution.")
+    if not any(
+        execution.outcome == Execution.Outcome.SUCCESS
+        and execution.validity == Execution.Validity.VALID
+        for execution in source_executions
+    ):
+        raise ValidationError("A Baseline requires at least one usable VALID SUCCESS Execution.")
+    baseline = Baseline.objects.create(
+        name=clean_name,
+        description=description,
+        source_run=locked_run,
+        source_target=locked_run.target,
+        created_by=actor,
+        is_active=bool(is_active),
+    )
+    BaselineMembership.objects.bulk_create(
+        [BaselineMembership(baseline=baseline, execution=execution) for execution in source_executions]
+    )
+    BaselineStateEvent.objects.create(baseline=baseline, is_active=baseline.is_active, actor=actor)
+    return baseline
+
+
+@transaction.atomic
+def set_baseline_active(*, actor, baseline: Baseline, is_active: bool):
+    """Append active/inactive attribution without touching immutable membership."""
+
+    require_admin(actor)
+    locked = Baseline.objects.select_for_update().get(pk=baseline.pk)
+    is_active = bool(is_active)
+    if locked.is_active == is_active:
+        return None
+    event = BaselineStateEvent.objects.create(baseline=locked, is_active=is_active, actor=actor)
+    Baseline.objects.filter(pk=locked.pk).update(is_active=is_active)
+    return event
+
+
+def _canonical_binding_signature(execution: Execution):
+    return tuple(
+        (binding.name, json.dumps(binding.value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        for binding in execution.resolved_bindings.order_by("name")
+    )
+
+
+def _controlled_preflight_reason(source: Execution) -> tuple[str, str] | None:
+    """Return a conservative reason when fixed historical input cannot replay."""
+
+    if source.validity == Execution.Validity.INVALID:
+        return (
+            "BASELINE_EXECUTION_INVALID",
+            "The fixed baseline Execution is currently INVALID and has no trustworthy comparison answer.",
+        )
+    if source.preflight_error_class:
+        return (
+            "FROZEN_BINDING_UNAVAILABLE",
+            "The baseline's frozen bindings were not safely executable in its recorded observation; no replacement will be selected.",
+        )
+    if not source.submitted_question:
+        return ("CONCRETE_QUESTION_MISSING", "The baseline observation has no concrete submitted question.")
+    if source.outcome != Execution.Outcome.SUCCESS or not source.raw_answer:
+        return (
+            "BASELINE_NO_USABLE_ANSWER",
+            "The baseline observation has no usable SUCCESS answer for answer-change comparison.",
+        )
+    return None
+
+
+@transaction.atomic
+def launch_controlled_comparison(*, actor, baseline: Baseline, target: EvaluationTarget):
+    """Create a new run with current target identity and exact baseline inputs.
+
+    This deliberately bypasses normal current-catalog eligibility: a baseline
+    can replay an old or retired QuestionVersion, but it cannot substitute a
+    newer QuestionVersion, dynamic object, or rewritten concrete question.
+    """
+
+    require_admin(actor)
+    locked_baseline = (
+        Baseline.objects.select_for_update()
+        .select_related("source_run", "source_target", "source_target__product", "source_target__environment")
+        .get(pk=baseline.pk)
+    )
+    if not locked_baseline.is_active:
+        raise ValidationError("Only an ACTIVE Baseline may launch a controlled comparison.")
+    locked_target = EvaluationTarget.objects.select_for_update().select_related(
+        "product", "environment"
+    ).get(pk=target.pk)
+    if not locked_target.is_active:
+        raise ValidationError("The selected current target is inactive.")
+    if (
+        locked_target.product_id != locked_baseline.source_target.product_id
+        or locked_target.environment_id != locked_baseline.source_target.environment_id
+    ):
+        raise ValidationError(
+            "A controlled comparison target must use the baseline Product and Environment context."
+        )
+    revision = locked_target.revisions.filter(valid_to__isnull=True).first()
+    if not revision or not revision.supports_question_api:
+        raise ValidationError("The selected current target has no compatible current question API revision.")
+    members = list(
+        locked_baseline.memberships.select_related(
+            "execution",
+            "execution__question",
+            "execution__question_version",
+        )
+        .prefetch_related("execution__resolved_bindings")
+        .order_by("execution__question_order")
+    )
+    if not members:
+        raise ValidationError("The Baseline has no captured membership to replay.")
+    requested_mode = revision.default_execution_mode
+    actual_concurrency = (
+        1
+        if requested_mode == EvaluationRun.ExecutionMode.SEQUENTIAL
+        else min(revision.max_concurrency, settings.WORKER_MAX_CONCURRENCY)
+    )
+    run = EvaluationRun.objects.create(
+        target=locked_target,
+        target_revision=revision,
+        launched_by=actor,
+        requested_mode=requested_mode,
+        configured_max_concurrency=revision.max_concurrency,
+        actual_concurrency=actual_concurrency,
+        question_timeout_seconds=revision.question_timeout_seconds,
+        inter_question_delay_seconds=revision.inter_question_delay_seconds,
+        total_planned=len(members),
+        selection_filter={
+            "controlled_baseline_id": str(locked_baseline.pk),
+            "frozen_baseline_inputs": True,
+        },
+        comparison_baseline=locked_baseline,
+    )
+    target_snapshot = TargetSnapshot.objects.create(run=run, **_target_snapshot_values(locked_target, revision))
+    build_snapshot = BuildSnapshot.objects.create(
+        run=run,
+        declared_product_version=revision.declared_product_version,
+        declared_build_id=revision.declared_build_id,
+        declared_git_sha=revision.declared_git_sha,
+    )
+    for order, membership in enumerate(members, start=1):
+        source = membership.execution
+        preflight = _controlled_preflight_reason(source)
+        replay = Execution.objects.create(
+            run=run,
+            question=source.question,
+            question_version=source.question_version,
+            target_revision=revision,
+            target_snapshot=target_snapshot,
+            build_snapshot=build_snapshot,
+            baseline_execution=source,
+            question_order=order,
+            question_stable_id=source.question_stable_id,
+            question_version_number=source.question_version_number,
+            question_template=source.question_template,
+            submitted_question=source.submitted_question,
+            adapter_key=revision.adapter_key,
+            adapter_version=revision.adapter_version,
+            normalizer_key=source.normalizer_key,
+            normalizer_version=source.normalizer_version,
+            preflight_error_class="COMPARISON_NON_COMPARABLE" if preflight else "",
+            preflight_error_detail=preflight[1] if preflight else "",
+            comparison_non_comparable_reason=preflight[0] if preflight else "",
+        )
+        ResolvedBinding.objects.bulk_create(
+            [
+                ResolvedBinding(
+                    execution=replay,
+                    name=binding.name,
+                    resolution_mode=ResolvedBinding.ResolutionMode.BASELINE_FROZEN,
+                    value=binding.value,
+                    display_value=binding.display_value,
+                )
+                for binding in source.resolved_bindings.all()
+            ]
+        )
+    Comparison.objects.create(
+        baseline=locked_baseline,
+        current_run=run,
+        algorithm_key="exact",
+        algorithm_version="exact-v1",
+    )
+    return run
+
+
+def normalize_exact_answer(value: str) -> str:
+    """M6's deliberately shallow, versioned normalization.
+
+    It normalizes line endings and trailing horizontal whitespace only.  It
+    never reorders, rewrites, lowercases, strips punctuation, or interprets
+    answer facts.
+    """
+
+    return "\n".join(line.rstrip(" \t") for line in value.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+
+
+def _exact_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _comparison_non_comparable_reason(baseline_execution: Execution, current_execution: Execution):
+    if current_execution.comparison_non_comparable_reason:
+        return (
+            current_execution.comparison_non_comparable_reason,
+            current_execution.preflight_error_detail
+            or "The controlled comparison input could not be reproduced safely.",
+        )
+    preflight = _controlled_preflight_reason(baseline_execution)
+    if preflight:
+        return preflight
+    if current_execution.validity == Execution.Validity.INVALID:
+        return (
+            "CURRENT_EXECUTION_INVALID",
+            "The current observation is INVALID and is excluded from answer-change comparison.",
+        )
+    if current_execution.outcome != Execution.Outcome.SUCCESS or not current_execution.raw_answer:
+        return (
+            "CURRENT_NO_USABLE_ANSWER",
+            "The current observation has no usable SUCCESS answer for answer-change comparison.",
+        )
+    if baseline_execution.question_id != current_execution.question_id:
+        return ("QUESTION_IDENTITY_MISMATCH", "The stable Question identity differs.")
+    if baseline_execution.question_version_id != current_execution.question_version_id:
+        return ("QUESTION_VERSION_MISMATCH", "The exact QuestionVersion differs.")
+    if baseline_execution.submitted_question != current_execution.submitted_question:
+        return ("CONCRETE_QUESTION_MISMATCH", "The exact concrete submitted question differs.")
+    if _canonical_binding_signature(baseline_execution) != _canonical_binding_signature(current_execution):
+        return ("FROZEN_BINDING_MISMATCH", "The exact frozen binding values differ.")
+    return None
+
+
+@transaction.atomic
+def record_exact_comparison(*, current_execution: Execution):
+    """Persist one immutable M6 comparison item after a terminal observation."""
+
+    # ``baseline_execution`` and ``current_human_review`` are nullable.  Do
+    # not join either while locking: PostgreSQL correctly rejects FOR UPDATE on
+    # the nullable side of an outer join.
+    current = Execution.objects.select_for_update().select_related("run").get(pk=current_execution.pk)
+    if not current.is_terminal or not current.baseline_execution_id:
+        return None
+    try:
+        comparison = Comparison.objects.select_for_update().get(current_run_id=current.run_id)
+    except Comparison.DoesNotExist:
+        return None
+    if ComparisonItem.objects.filter(comparison=comparison, current_execution=current).exists():
+        return None
+    current_review = HumanReview.objects.filter(pk=current.current_human_review_id).first()
+    baseline_execution = (
+        Execution.objects.select_related("current_human_review", "question_version")
+        .prefetch_related("resolved_bindings")
+        .get(pk=current.baseline_execution_id)
+    )
+    if (
+        current.run.comparison_baseline_id != comparison.baseline_id
+        or not BaselineMembership.objects.filter(
+            baseline_id=comparison.baseline_id,
+            execution_id=baseline_execution.pk,
+        ).exists()
+    ):
+        return ComparisonItem.objects.create(
+            comparison=comparison,
+            baseline_execution=baseline_execution,
+            current_execution=current,
+            change_state=ComparisonItem.ChangeState.NON_COMPARABLE,
+            non_comparable_reason="BASELINE_MEMBERSHIP_MISMATCH",
+            detail="The current replay does not reference immutable membership of its selected Baseline.",
+            baseline_human_review=baseline_execution.current_human_review,
+            current_human_review=current_review,
+        )
+    non_comparable = _comparison_non_comparable_reason(baseline_execution, current)
+    if non_comparable:
+        reason, detail = non_comparable
+        return ComparisonItem.objects.create(
+            comparison=comparison,
+            baseline_execution=baseline_execution,
+            current_execution=current,
+            change_state=ComparisonItem.ChangeState.NON_COMPARABLE,
+            non_comparable_reason=reason,
+            detail=detail,
+            baseline_human_review=baseline_execution.current_human_review,
+            current_human_review=current_review,
+        )
+    baseline_normalized = normalize_exact_answer(baseline_execution.display_answer or baseline_execution.raw_answer)
+    current_normalized = normalize_exact_answer(current.display_answer or current.raw_answer)
+    exact_equal = baseline_normalized == current_normalized
+    item = ComparisonItem.objects.create(
+        comparison=comparison,
+        baseline_execution=baseline_execution,
+        current_execution=current,
+        change_state=(
+            ComparisonItem.ChangeState.UNCHANGED if exact_equal else ComparisonItem.ChangeState.CHANGED
+        ),
+        exact_equal=exact_equal,
+        baseline_normalized_hash=_exact_hash(baseline_normalized),
+        current_normalized_hash=_exact_hash(current_normalized),
+        baseline_human_review=baseline_execution.current_human_review,
+        current_human_review=current_review,
+    )
+    if not exact_equal and current.review_state != Execution.ReviewState.REVIEWED:
+        ReviewTracking.objects.create(
+            execution=current,
+            state=Execution.ReviewState.REQUIRED,
+            actor=None,
+            cause=f"Exact comparison {comparison.algorithm_version} CHANGED (comparison item {item.pk})",
+        )
+        Execution.objects.filter(pk=current.pk).update(review_state=Execution.ReviewState.REQUIRED)
+    return item
+
+
+def comparison_human_transition(item: ComparisonItem) -> str:
+    """Display live human context without turning comparison into correctness."""
+
+    baseline_review = item.baseline_execution.current_human_review
+    current_review = item.current_execution.current_human_review
+    baseline = baseline_review.judgment if baseline_review else "unreviewed"
+    current = current_review.judgment if current_review else "unreviewed"
+    return f"{baseline} → {current}"
+
+
+def comparison_summary(comparison: Comparison) -> dict[str, int]:
+    """Transparent M6 triage counts from persisted comparison items."""
+
+    items = comparison.items.select_related("current_execution", "baseline_execution")
+    return {
+        "total": items.count(),
+        "unchanged": items.filter(change_state=ComparisonItem.ChangeState.UNCHANGED).count(),
+        "changed": items.filter(change_state=ComparisonItem.ChangeState.CHANGED).count(),
+        "non_comparable": items.filter(change_state=ComparisonItem.ChangeState.NON_COMPARABLE).count(),
+        "error": items.filter(current_execution__outcome=Execution.Outcome.ERROR).count(),
+        "timeout": items.filter(current_execution__outcome=Execution.Outcome.TIMEOUT).count(),
+        "pending_review": items.filter(current_execution__review_state=Execution.ReviewState.REQUIRED).count(),
+        "good_to_bad": items.filter(
+            baseline_execution__current_human_review__judgment=HumanReview.Judgment.GOOD,
+            current_execution__current_human_review__judgment=HumanReview.Judgment.BAD,
+        ).count(),
+        "bad_to_good": items.filter(
+            baseline_execution__current_human_review__judgment=HumanReview.Judgment.BAD,
+            current_execution__current_human_review__judgment=HumanReview.Judgment.GOOD,
+        ).count(),
+    }
+
+
 def _runtime_secret_values() -> tuple[str, ...]:
     """Known runtime credentials must never be persisted in reviewer text."""
 
@@ -445,6 +835,33 @@ def set_execution_validity(*, actor, execution: Execution, validity: str, commen
     else:
         values.update({"invalidated_by": None, "invalidated_at": None})
     Execution.objects.filter(pk=locked.pk).update(**values)
+    if validity == Execution.Validity.INVALID:
+        memberships = list(
+            BaselineMembership.objects.select_related("baseline")
+            .filter(execution=locked)
+            .order_by("baseline__created_at")
+        )
+        for membership in memberships:
+            baseline = membership.baseline
+            detail = (
+                f"Baseline member Execution {locked.pk} was marked INVALID; "
+                "membership and historical comparisons remain preserved."
+            )
+            BaselineAttentionEvent.objects.get_or_create(
+                baseline=baseline,
+                execution=locked,
+                defaults={
+                    "validity_decision": decision,
+                    "actor": actor,
+                    "detail": detail,
+                },
+            )
+            if not baseline.requires_attention:
+                Baseline.objects.filter(pk=baseline.pk).update(
+                    requires_attention=True,
+                    attention_opened_at=decision.decided_at,
+                    attention_detail=detail,
+                )
     return decision
 
 
@@ -887,6 +1304,10 @@ def _complete_execution(claim: ExecutionClaim, *, outcome, values):
         return False
     now = values.pop("completed_at", _database_now())
     _finalize_locked_execution(execution, outcome=outcome, values=values, now=now)
+    # The item is appended only after the current terminal observation exists.
+    # The comparison service never mutates it later, including after validity
+    # corrections or future normalization/comparator changes.
+    record_exact_comparison(current_execution=execution)
     run = EvaluationRun.objects.select_for_update().get(pk=execution.run_id)
     if not run.is_terminal and run.inter_question_delay_seconds:
         run.next_dispatch_at = now + timedelta(seconds=float(run.inter_question_delay_seconds))

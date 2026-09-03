@@ -9,7 +9,6 @@ from django.utils import timezone
 
 from catalog.models import TargetRevision
 from catalog.services import create_target_revision
-from evaluations.models import EvaluationRun, Execution
 
 
 M4 = ("evaluations", "0002_remove_evaluationrun_evaluations_m3_sequential_only_and_more")
@@ -164,13 +163,16 @@ def test_m5_migration_preserves_populated_m4_observations_and_only_initializes_m
 
     executor = MigrationExecutor(connection)
     executor.migrate([M5])
-    after = list(Execution.objects.order_by("run_id", "question_order").values_list(*fields))
+    m5_apps = executor.loader.project_state([M5]).apps
+    M5Run = m5_apps.get_model("evaluations", "EvaluationRun")
+    M5Execution = m5_apps.get_model("evaluations", "Execution")
+    after = list(M5Execution.objects.order_by("run_id", "question_order").values_list(*fields))
     assert after == before
-    upgraded = list(Execution.objects.order_by("run_id", "question_order"))
-    assert all(item.review_state == Execution.ReviewState.NONE for item in upgraded)
-    assert all(item.validity == Execution.Validity.VALID for item in upgraded)
+    upgraded = list(M5Execution.objects.order_by("run_id", "question_order"))
+    assert all(item.review_state == "NONE" for item in upgraded)
+    assert all(item.validity == "VALID" for item in upgraded)
     assert all(item.current_human_review_id is None for item in upgraded)
     assert all(item.invalidated_by_id is None and item.invalidated_at is None for item in upgraded)
     assert all(item.review_history.count() == item.validity_history.count() == item.comments.count() == 0 for item in upgraded)
-    assert EvaluationRun.objects.get(pk=first_run.pk).state == EvaluationRun.State.COMPLETED_WITH_ERRORS
-    assert EvaluationRun.objects.get(pk=second_run.pk).state == EvaluationRun.State.COMPLETED
+    assert M5Run.objects.get(pk=first_run.pk).state == "COMPLETED_WITH_ERRORS"
+    assert M5Run.objects.get(pk=second_run.pk).state == "COMPLETED"

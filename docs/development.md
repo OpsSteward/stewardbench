@@ -1,9 +1,8 @@
 # Development and deployment
 
-This page documents the implemented M0 foundation, M1 managed catalog, M2
-reconciled corpus import, M3 frozen execution slice, and M4 durable worker.
-M4 does not imply human review, retries/reruns, baselines, comparison,
-conversations, or real OpsSteward wire-contract certification.
+This page documents the implemented M0 foundation through M6 exact baseline
+comparison. Semantic comparison, conversations, and real OpsSteward
+wire-contract certification remain later milestones.
 
 ## Runtime and configuration
 
@@ -211,6 +210,44 @@ automatically. Configure them explicitly through the ADMIN UI so initial data
 is visible, reversible, and environment-appropriate. Catalog configuration
 itself performs no target call; only the separate M4 worker performs a frozen
 Run through its configured adapter.
+
+## M6 baselines and exact controlled comparison
+
+An ADMIN can create a named Baseline from a completed Run that has at least one
+usable VALID SUCCESS observation. Promotion fixes the source Run and exact
+Execution membership permanently; later retries, reruns, reviews, comments, or
+validity decisions never rewrite or extend that member set. Baselines are
+observed history, not answer keys: they can contain BAD, unreviewed, ERROR,
+TIMEOUT, or later-invalidated observations. The promotion and Baseline detail
+views show total, valid/invalid, reviewed/unreviewed, GOOD/BAD, and execution
+outcome completeness without an approval gate or invented score.
+
+Baselines can be ACTIVE or INACTIVE. Every designation change appends an
+attributed state-history event, and deactivation never deletes the Baseline,
+source Run, members, or prior Comparison records. If an existing member later
+becomes INVALID, StewardBench retains the member and all comparison evidence,
+then records durable ADMIN-attention context on the Baseline.
+
+From an ACTIVE Baseline, an ADMIN launches a new controlled comparison Run
+against a selected current target in the same Product/Environment context. The
+new Run snapshots that target's current TargetRevision and build declaration at
+launch, while every replay Execution reuses the historical exact
+QuestionVersion, concrete submitted question, and resolved binding values. It
+does not select a newer QuestionVersion or substitute a fresh binding. A
+frozen input that cannot safely be replayed is persisted as NON_COMPARABLE and
+is completed without a target submission.
+
+M6 comparison uses `exact-v1`: line ending normalization plus trailing
+horizontal-whitespace normalization only. Equal normalized answers are
+UNCHANGED; unequal answers are CHANGED and set the current Execution to
+REQUIRED unless a later legitimate review already made it REVIEWED. Neither
+state determines GOOD/BAD or regression. ERROR/TIMEOUT, invalidity, and human
+GOOD/BAD transitions stay separate. In particular, an answer equal to a BAD
+baseline remains current-unreviewed until a human explicitly reviews it.
+Comparison records and their per-pair hashes/reasons are immutable. The
+comparison list/detail and execution workstation expose M6 summary counters,
+URL-addressable triage filters, NON_COMPARABLE reasons, and baseline/current
+answers with their independent target/build, review, and validity context.
 
 ## Reconciled source corpus
 

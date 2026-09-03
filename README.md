@@ -22,11 +22,11 @@ workflow:
 > Questions → Execute → Capture → Review → Baseline → Re-execute → Compare →
 > Review Changes
 
-The initial baseline is intentionally human-reviewed. On later runs,
-StewardBench uses exact and conservative semantic comparison to reduce review
-to errors, timeouts, material changes, uncertain comparisons, and relevant
-GOOD/BAD transitions. A changed answer is not automatically a regression, and
-a baseline is observed historical performance—not universal ground truth.
+The initial baseline is intentionally human-reviewed. M6 later runs use only
+versioned exact comparison, so an exact change is surfaced for human review
+without being called a regression or a correctness result. Conservative
+semantic comparison is a later milestone. A baseline is observed historical
+performance—not universal ground truth.
 
 ## Status
 
@@ -38,7 +38,9 @@ the deterministic fake-target adapter. M4 hardens it with PostgreSQL claim
 leases, multiple workers, sequential or bounded parallel execution,
 target-revision-wide capacity, and conservative ambiguous-call recovery. M5
 adds attributed append-only human review, comments, validity decisions, and
-retry/rerun history. Baselines, comparison, and real OpsSteward wire-contract
+retry/rerun history. M6 adds named immutable Baselines, controlled replay using
+the exact historical QuestionVersion/bindings/concrete question, and versioned
+exact comparison. Semantic comparison and real OpsSteward wire-contract
 certification remain later milestones.
 
 ## Run with Docker
@@ -128,5 +130,5 @@ and future executable acceptance-harness architectures are now documented.
 The authoritative v1 implementation milestone plan pairs each product increment
 with development tests and independent acceptance evidence. The repository-
 specific development and independent QA/acceptance skills govern implementation
-and acceptance work. M0, M1, and M2 are implemented; later milestones remain
-separately authorized.
+and acceptance work. M0 through M6 are implemented; M7 and later milestones
+remain separately authorized.

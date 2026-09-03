@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Baselines · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs">Evaluations / Baselines</p>{% endblock %}
+{% block content %}
+<header class="page-header"><h1>Baselines</h1><p>Named immutable historical observations for controlled comparison. They are not answer keys or ground truth.</p></header>
+<section class="panel table-wrap"><table><thead><tr><th>Name</th><th>State</th><th>Historical context</th><th>Source Run</th><th>Completeness</th><th>Attention</th><th>Created</th></tr></thead><tbody>
+{% for baseline, completeness in baseline_rows %}<tr>
+  <td><a href="{% url 'baseline-detail' baseline.pk %}">{{ baseline.name }}</a>{% if baseline.description %}<br><small class="muted">{{ baseline.description|truncatechars:100 }}</small>{% endif %}</td>
+  <td><span class="badge">{% if baseline.is_active %}ACTIVE{% else %}INACTIVE{% endif %}</span></td>
+  <td>{{ baseline.source_target.product.display_name }} / {{ baseline.source_target.environment.display_name }}<br>{{ baseline.source_target.display_name }}<br><small>{{ baseline.source_run.build_snapshot.declared_product_version|default:"Unknown" }} {{ baseline.source_run.build_snapshot.declared_build_id|default:"" }} {{ baseline.source_run.build_snapshot.declared_git_sha|default:"" }}</small></td>
+  <td><a href="{% url 'run-detail' baseline.source_run_id %}">{{ baseline.source_run_id }}</a></td>
+  <td>{{ completeness.total }} total · {{ completeness.human_reviewed }} reviewed · {{ completeness.unreviewed }} unreviewed<br>{{ completeness.good }} GOOD · {{ completeness.bad }} BAD · {{ completeness.invalid }} invalid</td>
+  <td>{% if baseline.requires_attention %}<strong>ADMIN ATTENTION</strong><br><small>{{ baseline.attention_detail }}</small>{% else %}None{% endif %}</td>
+  <td>{{ baseline.created_at }}<br><small>by {{ baseline.created_by.username }}</small></td>
+</tr>{% empty %}<tr><td colspan="7">No Baselines have been created.</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

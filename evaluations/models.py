@@ -71,6 +71,13 @@ class EvaluationRun(models.Model):
         related_name="retry_runs",
     )
     retry_request_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    comparison_baseline = models.ForeignKey(
+        "Baseline",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="controlled_runs",
+    )
 
     class Meta:
         ordering = ("-created_at",)
@@ -262,6 +269,7 @@ class Execution(models.Model):
     error_detail = models.TextField(blank=True)
     preflight_error_class = models.CharField(max_length=80, blank=True)
     preflight_error_detail = models.TextField(blank=True)
+    comparison_non_comparable_reason = models.CharField(max_length=120, blank=True)
     claim_worker_id = models.CharField(max_length=200, blank=True)
     claim_token = models.UUIDField(null=True, blank=True, editable=False)
     claim_attempt = models.PositiveIntegerField(default=0)
@@ -307,6 +315,14 @@ class Execution(models.Model):
         blank=True,
         on_delete=models.PROTECT,
         related_name="retried_executions",
+    )
+    baseline_execution = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="controlled_replay_executions",
+        help_text="Historical baseline observation whose exact inputs this controlled replay uses.",
     )
 
     class Meta:
@@ -397,6 +413,7 @@ class Execution(models.Model):
 class ResolvedBinding(models.Model):
     class ResolutionMode(models.TextChoices):
         FIXED_ADMIN = "FIXED_ADMIN", "Fixed admin"
+        BASELINE_FROZEN = "BASELINE_FROZEN", "Baseline frozen"
 
     execution = models.ForeignKey(Execution, on_delete=models.PROTECT, related_name="resolved_bindings")
     name = models.CharField(max_length=80)
@@ -653,3 +670,265 @@ class LLMJudgeResult(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("LLM judge results are immutable and cannot be deleted.")
+
+
+class Baseline(models.Model):
+    """A named immutable reference to observations from one completed Run.
+
+    The administrative active and attention projections intentionally sit beside
+    the immutable source/membership fields.  Their attributed histories live in
+    separate append-only event rows below.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=180)
+    description = models.TextField(blank=True)
+    source_run = models.ForeignKey(
+        EvaluationRun,
+        on_delete=models.PROTECT,
+        related_name="promoted_baselines",
+    )
+    source_target = models.ForeignKey(
+        EvaluationTarget,
+        on_delete=models.PROTECT,
+        related_name="baselines",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_baselines",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+    requires_attention = models.BooleanField(default=False)
+    attention_opened_at = models.DateTimeField(null=True, blank=True)
+    attention_detail = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("source_target", "name"),
+                name="evaluations_baseline_name_per_target_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError(
+                "Baselines are immutable; use the attributed service to change active state."
+            )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Baselines are retained historical references and cannot be deleted.")
+
+
+class BaselineMembership(models.Model):
+    """Immutable captured Baseline membership; it never absorbs retries."""
+
+    baseline = models.ForeignKey(
+        Baseline,
+        on_delete=models.PROTECT,
+        related_name="memberships",
+    )
+    execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="baseline_memberships",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("execution__question_order", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("baseline", "execution"),
+                name="evaluations_baseline_membership_unique",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Baseline membership is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Baseline membership cannot be deleted.")
+
+
+class BaselineStateEvent(models.Model):
+    """Append-only attribution for active/inactive baseline designation."""
+
+    baseline = models.ForeignKey(
+        Baseline,
+        on_delete=models.PROTECT,
+        related_name="state_history",
+    )
+    is_active = models.BooleanField()
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="baseline_state_events",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Baseline state history is append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Baseline state history cannot be deleted.")
+
+
+class BaselineAttentionEvent(models.Model):
+    """Durable notice that a fixed baseline member became INVALID later."""
+
+    baseline = models.ForeignKey(
+        Baseline,
+        on_delete=models.PROTECT,
+        related_name="attention_events",
+    )
+    execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="baseline_attention_events",
+    )
+    validity_decision = models.ForeignKey(
+        ExecutionValidityDecision,
+        on_delete=models.PROTECT,
+        related_name="baseline_attention_events",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="baseline_attention_events",
+    )
+    detail = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("baseline", "execution"),
+                name="evaluations_baseline_attention_member_unique",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Baseline attention history is append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Baseline attention history cannot be deleted.")
+
+
+class Comparison(models.Model):
+    """One immutable exact-comparison analysis of a controlled Run."""
+
+    baseline = models.ForeignKey(
+        Baseline,
+        on_delete=models.PROTECT,
+        related_name="comparisons",
+    )
+    current_run = models.OneToOneField(
+        EvaluationRun,
+        on_delete=models.PROTECT,
+        related_name="comparison",
+    )
+    algorithm_key = models.CharField(max_length=80, default="exact")
+    algorithm_version = models.CharField(max_length=80, default="exact-v1")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("baseline", "current_run"),
+                name="evaluations_comparison_baseline_run_unique",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Comparison records are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Comparison records cannot be deleted.")
+
+
+class ComparisonItem(models.Model):
+    """Immutable M6 exact-comparison result for one historical/current pair."""
+
+    class ChangeState(models.TextChoices):
+        UNCHANGED = "UNCHANGED", "Unchanged"
+        CHANGED = "CHANGED", "Changed"
+        NON_COMPARABLE = "NON_COMPARABLE", "Non-comparable"
+
+    comparison = models.ForeignKey(
+        Comparison,
+        on_delete=models.PROTECT,
+        related_name="items",
+    )
+    baseline_execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="baseline_comparison_items",
+    )
+    current_execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="current_comparison_items",
+    )
+    change_state = models.CharField(max_length=20, choices=ChangeState.choices)
+    exact_equal = models.BooleanField(null=True, blank=True)
+    baseline_normalized_hash = models.CharField(max_length=64, blank=True)
+    current_normalized_hash = models.CharField(max_length=64, blank=True)
+    non_comparable_reason = models.CharField(max_length=120, blank=True)
+    detail = models.TextField(blank=True)
+    baseline_human_review = models.ForeignKey(
+        HumanReview,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="baseline_comparison_item_snapshots",
+    )
+    current_human_review = models.ForeignKey(
+        HumanReview,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="current_comparison_item_snapshots",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("current_execution__question_order", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("comparison", "current_execution"),
+                name="evaluations_comparison_item_current_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(change_state__in=("UNCHANGED", "CHANGED", "NON_COMPARABLE")),
+                name="evaluations_comparison_item_change_state",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Comparison items are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Comparison items cannot be deleted.")

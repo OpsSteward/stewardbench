@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, urlencode
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Case, IntegerField, Value, When
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -11,12 +12,26 @@ from django.urls import reverse
 from accounts.policy import require_admin
 from catalog.models import Question
 
-from .forms import CommentForm, HumanReviewForm, LaunchRunForm, ReviewStateForm, ValidityForm
-from .models import EvaluationRun, Execution
+from .forms import (
+    BaselinePromotionForm,
+    BaselineStateForm,
+    CommentForm,
+    ControlledComparisonRunForm,
+    HumanReviewForm,
+    LaunchRunForm,
+    ReviewStateForm,
+    ValidityForm,
+)
+from .models import Baseline, Comparison, ComparisonItem, EvaluationRun, Execution
 from .services import (
     append_execution_comment,
     append_run_comment,
+    baseline_completeness,
+    comparison_human_transition,
+    comparison_summary,
+    create_baseline,
     eligible_question_count,
+    launch_controlled_comparison,
     launch_run,
     mark_review_required,
     mark_reviewed_without_judgment,
@@ -25,6 +40,7 @@ from .services import (
     retry_execution,
     run_progress,
     run_review_metrics,
+    set_baseline_active,
     set_execution_validity,
 )
 
@@ -60,6 +76,9 @@ def run_detail(request, run_id):
             "launched_by",
             "source_run",
             "source_execution",
+            "comparison_baseline",
+            "comparison",
+            "comparison__baseline",
         ).prefetch_related("comments__author"),
         pk=run_id,
     )
@@ -77,6 +96,7 @@ def run_detail(request, run_id):
             "review_metrics": run_review_metrics(run),
             "executions": executions,
             "run_comment_form": CommentForm(),
+            "baseline_promotion_form": BaselinePromotionForm(),
         },
     )
 
@@ -197,6 +217,20 @@ def execution_detail(request, execution_id):
         .order_by("question_order")
         .first()
     )
+    comparison_item = (
+        ComparisonItem.objects.filter(current_execution=execution)
+        .select_related(
+            "comparison",
+            "comparison__baseline",
+            "baseline_execution",
+            "baseline_execution__target_snapshot",
+            "baseline_execution__build_snapshot",
+            "baseline_execution__current_human_review",
+            "current_execution__current_human_review",
+        )
+        .prefetch_related("baseline_execution__resolved_bindings")
+        .first()
+    )
     return render(
         request,
         "evaluations/execution_detail.html",
@@ -215,6 +249,238 @@ def execution_detail(request, execution_id):
             "next_execution_id": next_execution_id,
             "next_unreviewed": next_unreviewed,
             "next_required": next_required,
+            "comparison_item": comparison_item,
+            "comparison_transition": comparison_human_transition(comparison_item) if comparison_item else None,
+        },
+    )
+
+
+@login_required
+def baseline_list(request):
+    baselines = (
+        Baseline.objects.select_related(
+            "source_run",
+            "source_run__target_snapshot",
+            "source_run__build_snapshot",
+            "source_target",
+            "source_target__product",
+            "source_target__environment",
+            "created_by",
+        )
+        .prefetch_related("attention_events")
+        .all()
+    )
+    return render(
+        request,
+        "evaluations/baseline_list.html",
+        {"baseline_rows": [(baseline, baseline_completeness(baseline)) for baseline in baselines]},
+    )
+
+
+@login_required
+def baseline_detail(request, baseline_id):
+    baseline = get_object_or_404(
+        Baseline.objects.select_related(
+            "source_run",
+            "source_run__target_snapshot",
+            "source_run__build_snapshot",
+            "source_target",
+            "source_target__product",
+            "source_target__environment",
+            "created_by",
+        ).prefetch_related(
+            "state_history__actor",
+            "attention_events__execution",
+            "attention_events__actor",
+        ),
+        pk=baseline_id,
+    )
+    memberships = baseline.memberships.select_related(
+        "execution",
+        "execution__question_version",
+        "execution__target_snapshot",
+        "execution__build_snapshot",
+        "execution__current_human_review",
+    ).prefetch_related("execution__resolved_bindings").order_by("execution__question_order")
+    return render(
+        request,
+        "evaluations/baseline_detail.html",
+        {
+            "baseline": baseline,
+            "completeness": baseline_completeness(baseline),
+            "memberships": memberships,
+            "state_form": BaselineStateForm(initial={"is_active": not baseline.is_active}),
+            "comparison_form": ControlledComparisonRunForm(
+                baseline=baseline,
+                initial={"target": baseline.source_target_id},
+            ),
+        },
+    )
+
+
+@login_required
+def create_baseline_view(request, run_id):
+    _require_admin(request)
+    run = get_object_or_404(EvaluationRun, pk=run_id)
+    if request.method != "POST":
+        return redirect("run-detail", run_id=run.pk)
+    form = BaselinePromotionForm(request.POST)
+    if form.is_valid():
+        try:
+            baseline = create_baseline(actor=request.user, source_run=run, **form.cleaned_data)
+        except ValidationError as error:
+            messages.error(request, error.messages[0])
+        else:
+            messages.success(
+                request,
+                f"Baseline {baseline.name} was created from fixed historical observations; it is not ground truth.",
+            )
+            return redirect("baseline-detail", baseline_id=baseline.pk)
+    else:
+        messages.error(request, "Baseline could not be created. Provide a name and review the completeness warning.")
+    return redirect("run-detail", run_id=run.pk)
+
+
+@login_required
+def baseline_state_view(request, baseline_id):
+    _require_admin(request)
+    baseline = get_object_or_404(Baseline, pk=baseline_id)
+    if request.method == "POST":
+        form = BaselineStateForm(request.POST)
+        if form.is_valid():
+            try:
+                event = set_baseline_active(
+                    actor=request.user,
+                    baseline=baseline,
+                    is_active=form.cleaned_data["is_active"],
+                )
+            except ValidationError as error:
+                messages.error(request, error.messages[0])
+            else:
+                if event:
+                    messages.success(request, f"Baseline is now {'ACTIVE' if event.is_active else 'INACTIVE'}.")
+                else:
+                    messages.info(request, "Baseline already has that active state.")
+        else:
+            messages.error(request, "Baseline state could not be changed.")
+    return redirect("baseline-detail", baseline_id=baseline.pk)
+
+
+@login_required
+def launch_controlled_comparison_view(request, baseline_id):
+    _require_admin(request)
+    baseline = get_object_or_404(Baseline.objects.select_related("source_target"), pk=baseline_id)
+    if request.method != "POST":
+        return redirect("baseline-detail", baseline_id=baseline.pk)
+    form = ControlledComparisonRunForm(request.POST, baseline=baseline)
+    if form.is_valid():
+        try:
+            run = launch_controlled_comparison(
+                actor=request.user,
+                baseline=baseline,
+                target=form.cleaned_data["target"],
+            )
+        except (PermissionDenied, ValidationError) as error:
+            messages.error(request, getattr(error, "messages", [str(error)])[0])
+        else:
+            messages.success(
+                request,
+                f"Controlled comparison Run {run.id} created with current target identity and exact baseline inputs.",
+            )
+            return redirect("run-detail", run_id=run.pk)
+    else:
+        messages.error(request, "Controlled comparison could not be launched.")
+    return redirect("baseline-detail", baseline_id=baseline.pk)
+
+
+@login_required
+def comparison_list(request):
+    comparisons = Comparison.objects.select_related(
+        "baseline",
+        "current_run",
+        "current_run__target_snapshot",
+        "current_run__build_snapshot",
+    ).all()
+    return render(
+        request,
+        "evaluations/comparison_list.html",
+        {"comparison_rows": [(comparison, comparison_summary(comparison)) for comparison in comparisons]},
+    )
+
+
+@login_required
+def comparison_detail(request, comparison_id):
+    comparison = get_object_or_404(
+        Comparison.objects.select_related(
+            "baseline",
+            "current_run",
+            "current_run__target_snapshot",
+            "current_run__build_snapshot",
+        ),
+        pk=comparison_id,
+    )
+    items = comparison.items.select_related(
+        "baseline_execution",
+        "baseline_execution__current_human_review",
+        "current_execution",
+        "current_execution__current_human_review",
+        "current_execution__target_snapshot",
+        "current_execution__build_snapshot",
+    )
+    selected_state = request.GET.get("state", "")
+    selected_outcome = request.GET.get("outcome", "")
+    selected_review = request.GET.get("review", "")
+    selected_transition = request.GET.get("transition", "")
+    if selected_state in ComparisonItem.ChangeState.values:
+        items = items.filter(change_state=selected_state)
+    if selected_outcome in (Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT):
+        items = items.filter(current_execution__outcome=selected_outcome)
+    if selected_review == Execution.ReviewState.REQUIRED:
+        items = items.filter(current_execution__review_state=selected_review)
+    if selected_transition == "GOOD_TO_BAD":
+        items = items.filter(
+            baseline_execution__current_human_review__judgment="GOOD",
+            current_execution__current_human_review__judgment="BAD",
+        )
+    if selected_transition == "BAD_TO_GOOD":
+        items = items.filter(
+            baseline_execution__current_human_review__judgment="BAD",
+            current_execution__current_human_review__judgment="GOOD",
+        )
+    items = items.annotate(
+        triage_priority=Case(
+            When(current_execution__outcome__in=(Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT), then=Value(1)),
+            When(
+                baseline_execution__current_human_review__judgment="GOOD",
+                current_execution__current_human_review__judgment="BAD",
+                then=Value(2),
+            ),
+            When(
+                change_state=ComparisonItem.ChangeState.CHANGED,
+                current_execution__review_state=Execution.ReviewState.REQUIRED,
+                then=Value(3),
+            ),
+            When(
+                baseline_execution__current_human_review__judgment="BAD",
+                current_execution__current_human_review__judgment="GOOD",
+                then=Value(4),
+            ),
+            When(change_state=ComparisonItem.ChangeState.NON_COMPARABLE, then=Value(5)),
+            default=Value(6),
+            output_field=IntegerField(),
+        )
+    ).order_by("triage_priority", "current_execution__question_order")
+    return render(
+        request,
+        "evaluations/comparison_detail.html",
+        {
+            "comparison": comparison,
+            "summary": comparison_summary(comparison),
+            "item_rows": [(item, comparison_human_transition(item)) for item in items],
+            "selected_state": selected_state,
+            "selected_outcome": selected_outcome,
+            "selected_review": selected_review,
+            "selected_transition": selected_transition,
         },
     )
 

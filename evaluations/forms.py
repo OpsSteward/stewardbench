@@ -1,7 +1,7 @@
 from django import forms
 
 from catalog.models import EvaluationTarget
-from evaluations.models import EvaluationRun, Execution, HumanReview
+from evaluations.models import Baseline, EvaluationRun, Execution, HumanReview
 
 
 class LaunchRunForm(forms.Form):
@@ -63,3 +63,47 @@ class ValidityForm(forms.Form):
         strip=False,
         widget=forms.Textarea(attrs={"rows": 3, "placeholder": "Optional invalidation context"}),
     )
+
+
+class BaselinePromotionForm(forms.Form):
+    name = forms.CharField(max_length=180, label="Baseline name")
+    description = forms.CharField(
+        required=False,
+        strip=False,
+        widget=forms.Textarea(attrs={"rows": 3, "placeholder": "Optional historical context"}),
+    )
+    is_active = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Make this Baseline active now",
+    )
+
+
+class BaselineStateForm(forms.Form):
+    is_active = forms.TypedChoiceField(
+        choices=(("true", "Activate"), ("false", "Deactivate")),
+        coerce=lambda value: value == "true",
+        widget=forms.HiddenInput,
+    )
+
+
+class ControlledComparisonRunForm(forms.Form):
+    target = forms.ModelChoiceField(
+        queryset=EvaluationTarget.objects.none(),
+        label="Current evaluation target",
+        help_text="Current target/build identity is frozen at launch; baseline questions and bindings remain historical.",
+    )
+
+    def __init__(self, *args, baseline: Baseline | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        targets = EvaluationTarget.objects.filter(
+            is_active=True,
+            revisions__valid_to__isnull=True,
+            revisions__supports_question_api=True,
+        ).select_related("product", "environment").distinct().order_by("display_name")
+        if baseline is not None:
+            targets = targets.filter(
+                product_id=baseline.source_target.product_id,
+                environment_id=baseline.source_target.environment_id,
+            )
+        self.fields["target"].queryset = targets
