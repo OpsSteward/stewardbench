@@ -49,10 +49,25 @@ tbody tr:last-child td { border-bottom: 0; }
 .form-panel { max-width: 680px; }
 .field { display: grid; gap: 5px; margin-bottom: 17px; }
 .field label { font-weight: 700; }
-.field input:not([type="checkbox"]), .field select { width: 100%; padding: 9px 10px; border: 1px solid #aebbc7; border-radius: 4px; font: inherit; }
+.field input:not([type="checkbox"]), .field select, .field textarea { width: 100%; padding: 9px 10px; border: 1px solid #aebbc7; border-radius: 4px; font: inherit; }
+.field textarea { min-height: 110px; resize: vertical; }
+.field select[multiple] { min-height: 110px; }
 .help { margin: 0; color: var(--muted); font-size: 12px; }
 .error, .errorlist { color: var(--danger); }
 .actions { display: flex; gap: 10px; }
+.actions.compact { align-items: center; flex-wrap: wrap; }
+.stack { display: grid; gap: 18px; }
+.detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.detail-grid > div { padding: 12px; border: 1px solid var(--border); border-radius: 5px; }
+.badge { display: inline-block; padding: 2px 7px; border-radius: 999px; background: #e8eff6; color: #23425e; font-size: 12px; font-weight: 700; }
+.badge.active { background: #e4f3e8; color: #23633a; }
+.badge.retired { background: #f0e7e7; color: #733333; }
+.muted { color: var(--muted); }
+.pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.filters { display: grid; grid-template-columns: 2fr repeat(3, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; margin-bottom: 18px; }
+.filters label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.filters input, .filters select { width: 100%; padding: 8px; border: 1px solid #aebbc7; border-radius: 4px; font: inherit; }
+.pagination { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
 .message { padding: 10px 12px; border-left: 4px solid var(--blue); background: white; }
 .login-panel { max-width: 430px; margin: 10vh auto; padding: 28px; border: 1px solid var(--border); border-radius: 7px; background: white; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -62,4 +77,5 @@ tbody tr:last-child td { border-bottom: 0; }
   .account-panel { margin-top: 0; }
   .content { padding: 24px 18px; }
   .status-grid { grid-template-columns: 1fr; }
+  .detail-grid, .filters { grid-template-columns: 1fr; }
 }

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}{{ product.display_name }} · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'product-list' %}">Products</a> / {{ product.display_name }}</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><p class="eyebrow">Product</p><h1>{{ product.display_name }}</h1><p>{{ product.description|default:"No description." }}</p></div>{% if user.is_stewardbench_admin %}<a class="button" href="{% url 'product-update' product.slug %}">Edit</a>{% endif %}</header>
+<section class="panel stack"><dl class="detail-grid"><div><dt>Stable identifier</dt><dd>{{ product.slug }}</dd></div><div><dt>State</dt><dd>{{ product.is_active|yesno:"Active,Inactive" }}</dd></div><div><dt>Created</dt><dd>{{ product.created_at }} by {{ product.created_by.username }}</dd></div></dl>
+<div class="table-wrap"><h2>Targets</h2><table><thead><tr><th>Target</th><th>Environment</th><th>State</th></tr></thead><tbody>{% for target in targets %}<tr><td><a href="{% url 'target-detail' target.slug %}">{{ target.display_name }}</a></td><td>{{ target.environment.display_name }}</td><td>{{ target.is_active|yesno:"Active,Inactive" }}</td></tr>{% empty %}<tr><td colspan="3">No targets.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

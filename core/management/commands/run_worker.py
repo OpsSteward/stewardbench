@@ -11,7 +11,7 @@ logger = logging.getLogger("stewardbench.worker")
 
 
 class Command(BaseCommand):
-    help = "Run the M0 PostgreSQL-connected idle worker foundation."
+    help = "Run the PostgreSQL-connected idle worker foundation."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true", help="Check readiness and exit.")
@@ -27,7 +27,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, stop)
 
         self._check_database()
-        logger.info("Worker foundation ready; no evaluation work exists in M0.")
+        logger.info("Worker foundation ready; evaluation dispatch begins in a later milestone.")
         if options["once"]:
             return
 

@@ -503,3 +503,21 @@ appropriate fields such as `created_at/by`, `reviewed_at/by`,
 `invalidated_at/by`, `run_started_at/by`, and `baseline_created_at/by`.
 Append-only comments, versions, execution history, and decision records supply
 the required audit trail.
+
+## M1 implementation realization
+
+The Django `catalog` app realizes the M1 identities without changing these
+conceptual semantics. Effective target classification and execution policy live
+on immutable TargetRevision rows, not on stable EvaluationTarget identity.
+Question lifecycle lives only on Question. Current TargetRevision and
+QuestionVersion are derived from `valid_to IS NULL`; PostgreSQL partial unique
+constraints permit one such row per stable parent. Application services take a
+parent row lock and atomically close the old temporal row and create the next
+monotonic revision/version.
+
+Normal product workflows expose no update or delete operation for historical
+TargetRevision, QuestionVersion, or BindingDefinition records. Stable Question
+IDs are text identifiers that support dots and hyphens. HistoricalFixture fixed
+parameters use PostgreSQL JSONB only for the deliberately variable, non-secret
+input context authorized above; identities, lifecycle, validity, and filtered
+catalog dimensions remain relational.

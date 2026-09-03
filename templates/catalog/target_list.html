@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Targets · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs">Catalog / Targets</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><h1>Evaluation targets</h1><p>Stable deployment/interface identities with versioned configuration.</p></div>{% if user.is_stewardbench_admin %}<a class="button primary" href="{% url 'target-create' %}">Create target</a>{% endif %}</header>
+<section class="panel table-wrap"><table><thead><tr><th>Target</th><th>Product</th><th>Environment</th><th>Classification</th><th>Revision</th><th>State</th></tr></thead><tbody>
+{% for target in targets %}{% with revision=target.current_revision %}<tr><td><a href="{% url 'target-detail' target.slug %}">{{ target.display_name }}</a></td><td>{{ target.product.display_name }}</td><td>{{ target.environment.display_name }}</td><td>{{ revision.get_classification_display|default:"Unknown" }}</td><td>{% if revision %}r{{ revision.revision_number }}{% else %}None{% endif %}</td><td>{{ target.is_active|yesno:"Active,Inactive" }}</td></tr>{% endwith %}{% empty %}<tr><td colspan="6">No targets configured.</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

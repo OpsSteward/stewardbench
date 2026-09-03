@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Domains · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs">Catalog / Domains</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><h1>Domains</h1><p>Controlled longitudinal reporting categories.</p></div>{% if user.is_stewardbench_admin %}<a class="button primary" href="{% url 'domain-create' %}">Create domain</a>{% endif %}</header>
+<section class="panel table-wrap"><table><thead><tr><th>Name</th><th>Identifier</th><th>State</th><th>Description</th><th></th></tr></thead><tbody>{% for domain in domains %}<tr><td>{{ domain.name }}</td><td>{{ domain.slug }}</td><td>{{ domain.is_active|yesno:"Active,Inactive" }}</td><td>{{ domain.description|truncatechars:100 }}</td><td>{% if user.is_stewardbench_admin %}<a href="{% url 'domain-update' domain.slug %}">Edit</a>{% endif %}</td></tr>{% empty %}<tr><td colspan="5">No domains configured.</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

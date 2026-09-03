@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Create target · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'target-list' %}">Targets</a> / Create</p>{% endblock %}
+{% block content %}
+<header class="page-header"><h1>Create target</h1><p>A target begins with immutable revision 1.</p></header>
+<form method="post" class="stack">
+  {% csrf_token %}
+  <section class="panel form-panel"><h2>Stable identity</h2>
+    {% if identity_form.non_field_errors %}<div class="error">{{ identity_form.non_field_errors }}</div>{% endif %}
+    {% for field in identity_form %}<div class="field">{{ field.label_tag }} {{ field }}{{ field.errors }}{% if field.help_text %}<p class="help">{{ field.help_text }}</p>{% endif %}</div>{% endfor %}
+  </section>
+  <section class="panel form-panel"><h2>Initial configuration</h2><p class="muted">Do not enter tokens, passwords, or secret-bearing URLs. Credential reference is a symbolic deployment name only.</p>
+    {% if revision_form.non_field_errors %}<div class="error">{{ revision_form.non_field_errors }}</div>{% endif %}
+    {% for field in revision_form %}<div class="field">{{ field.label_tag }} {{ field }}{{ field.errors }}{% if field.help_text %}<p class="help">{{ field.help_text }}</p>{% endif %}</div>{% endfor %}
+    <div class="actions"><button class="button primary" type="submit">Create target</button><a class="button" href="{% url 'target-list' %}">Cancel</a></div>
+  </section>
+</form>
+{% endblock %}

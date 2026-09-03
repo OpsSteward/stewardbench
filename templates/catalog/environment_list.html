@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Environments · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs">Catalog / Environments</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><h1>Environments</h1><p>Logical operational and data contexts.</p></div>{% if user.is_stewardbench_admin %}<a class="button primary" href="{% url 'environment-create' %}">Create environment</a>{% endif %}</header>
+<section class="panel table-wrap"><table><thead><tr><th>Name</th><th>Identifier</th><th>State</th><th>Created by</th></tr></thead><tbody>
+{% for environment in environments %}<tr><td><a href="{% url 'environment-detail' environment.slug %}">{{ environment.display_name }}</a></td><td>{{ environment.slug }}</td><td>{{ environment.is_active|yesno:"Active,Inactive" }}</td><td>{{ environment.created_by.username }}</td></tr>{% empty %}<tr><td colspan="4">No environments configured.</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

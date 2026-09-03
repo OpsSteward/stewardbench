@@ -35,7 +35,7 @@ product behavior or architecture.
 | [Framework selection](framework-selection.md) | Weighted technology comparison and selected v1 application, UI, persistence, worker, Docker, and testing architecture |
 | [Executable acceptance harness design](acceptance-harness-design.md) | Layered evidence architecture, deterministic doubles, PostgreSQL concurrency strategy, acceptance catalog, and implementation sequence |
 | [v1 implementation milestones](implementation-milestones.md) | Acceptance-first staged implementation plan, dependencies, schema/UI/harness sequencing, and complete scenario traceability |
-| [M0 development and deployment](development.md) | Implemented Docker, configuration, bootstrap, worker, testing, and smoke procedures |
+| [Development and deployment](development.md) | Implemented Docker, configuration, bootstrap, M1 catalog workflows, testing, and smoke procedures |
 | [Framework decision inputs](framework-decision-input.md) | Requirements used by the completed technology-selection phase |
 | [Open questions](open-questions.md) | Only decisions that still need product-owner or integration evidence |
 | [ADRs](adr/README.md) | Durable architectural decisions |

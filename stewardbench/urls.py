@@ -18,4 +18,5 @@ urlpatterns = [
     path("health/live/", core_views.liveness, name="health-live"),
     path("health/ready/", core_views.readiness, name="health-ready"),
     path("users/", include("accounts.urls")),
+    path("catalog/", include("catalog.urls")),
 ]

@@ -12,6 +12,7 @@ RUN addgroup --system stewardbench && adduser --system --ingroup stewardbench st
 
 COPY pyproject.toml README.md ./
 COPY accounts ./accounts
+COPY catalog ./catalog
 COPY core ./core
 COPY stewardbench ./stewardbench
 COPY templates ./templates

@@ -1,7 +1,8 @@
-# M0 development and deployment
+# Development and deployment
 
-This page documents the implemented M0 foundation only. It does not describe or
-imply question, target, run, baseline, comparator, judge, or adapter capability.
+This page documents the implemented M0 foundation and M1 managed catalog. It
+does not imply corpus import, run/execution, target API calls, baseline, review,
+comparison, judge, or adapter-runtime capability.
 
 ## Runtime and configuration
 
@@ -32,11 +33,40 @@ for the deployed HTTPS origin. Never put `.env` into an image or commit it.
 - `worker`: the same image running `python manage.py run_worker`; and
 - `db`: PostgreSQL 17.11 with the named `postgres_data` volume.
 
-The M0 worker connects to PostgreSQL, logs one readiness message, and stays
-alive with a bounded idle loop. It has no job table, claim logic, target call,
+The foundation worker connects to PostgreSQL, logs one readiness message, and
+stays alive with a bounded idle loop. It has no job table, claim logic, target call,
 or evaluation semantics. Those belong to later milestones. Both application
 services wait for PostgreSQL health. Migrations remain an explicit one-shot
 operation and never run implicitly in web or worker startup.
+
+## Managed catalog
+
+After signing in, all authenticated users can browse Products, Environments,
+Targets and their configuration history, Questions and their version history,
+Domains, Tags, and optional Historical Fixtures. ADMIN can use the product UI
+to create and update stable catalog metadata, create target revisions, create
+questions and new question versions, and activate or retire questions.
+OPERATOR sees the same catalog evidence but every catalog mutation is denied at
+the server and service boundaries.
+
+Target endpoint, adapter, technical capability, classification, execution
+policy, credential reference, or declared-build fallback changes are made with
+**New revision**. Existing TargetRevision rows have no update/delete product
+workflow. Likewise, evaluation-relevant question text, guidance, or binding
+changes use **New version**; historical QuestionVersion and BindingDefinition
+rows are immutable through supported workflows. PostgreSQL permits at most one
+current (`valid_to IS NULL`) row per target/question, and service transitions
+lock the stable parent and close/create the temporal pair atomically.
+
+Credential references are symbolic deployment-secret names only. The target
+endpoint form rejects user information, query parameters, and fragments, and
+fixture fixed-parameter keys reject credential-shaped names. Never put usable
+credentials into catalog records.
+
+The Product and Environment examples in the product definition are not loaded
+automatically. Configure them explicitly through the ADMIN UI so initial data
+is visible, reversible, and environment-appropriate. M1 performs no live target
+call.
 
 After changing application code, rebuild the image:
 
@@ -97,7 +127,9 @@ docker compose run --rm web python -m pytest tests/acceptance
 
 pytest creates and migrates a disposable PostgreSQL test database using the
 configured PostgreSQL server. A session fixture rejects any non-PostgreSQL
-connection.
+connection. M1 extends the `minimal-domain` fixture with a product-neutral
+Product, Environment, TargetRevision, Domain, Unicode Tag, and exact active
+QuestionVersion.
 
 Run Django and migration consistency checks with:
 

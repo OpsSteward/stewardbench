@@ -30,13 +30,13 @@ a baseline is observed historical performance—not universal ground truth.
 
 ## Status
 
-M0 provides the runnable authenticated foundation: Django 5.2, PostgreSQL-only
-persistence, Docker web/worker/database processes, local authentication,
-ADMIN/OPERATOR authorization, user administration, and the operational shell.
-Evaluation catalog and execution capabilities intentionally begin in later,
-separately authorized milestones.
+M0 provides the runnable authenticated foundation. M1 adds the managed,
+product-neutral catalog: products, environments, stable targets with immutable
+configuration revisions, controlled domains/tags, historical fixtures, and
+stable questions with exact temporal versions. Execution, import, baselines,
+review, comparison, and evaluated-product adapters remain unimplemented.
 
-## Run M0 with Docker
+## Run with Docker
 
 Requirements: Docker Engine with Compose, and a shell for generating local
 secret values.
@@ -68,7 +68,9 @@ already exists and never changes an existing account.
 Open <http://localhost:8000/>. After login, an ADMIN can create, activate,
 deactivate, re-role, and reset passwords for later users from **Users**.
 OPERATOR accounts can enter the application but have no administrative mutation
-access.
+access. ADMIN can curate the M1 catalog from **Questions**, **Products**,
+**Environments**, **Targets**, **Domains**, **Tags**, and **Historical
+fixtures**. OPERATOR can browse those same catalog records read-only.
 
 See [development and deployment instructions](docs/development.md) for checks,
 configuration, the worker foundation, Docker smoke, and DGX guidance.
@@ -107,6 +109,7 @@ configuration, the worker foundation, Docker smoke, and DGX guidance.
 See the [roadmap](docs/roadmap.md) for authoritative boundaries. The framework
 and future executable acceptance-harness architectures are now documented.
 The authoritative v1 implementation milestone plan pairs each product increment
-with development tests and independent acceptance scenarios. M0 is the only
-implemented milestone. The repository-specific development and independent
-QA/acceptance skills govern implementation and acceptance work.
+with development tests and independent acceptance evidence. M0 and M1 are
+implemented; later milestones remain separately authorized. The repository-
+specific development and independent QA/acceptance skills govern implementation
+and acceptance work.

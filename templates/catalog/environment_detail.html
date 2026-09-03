@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ environment.display_name }} · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs"><a href="{% url 'environment-list' %}">Environments</a> / {{ environment.display_name }}</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><p class="eyebrow">Environment</p><h1>{{ environment.display_name }}</h1><p>{{ environment.description|default:"No description." }}</p></div>{% if user.is_stewardbench_admin %}<a class="button" href="{% url 'environment-update' environment.slug %}">Edit</a>{% endif %}</header>
+<section class="panel stack"><dl class="detail-grid"><div><dt>Stable identifier</dt><dd>{{ environment.slug }}</dd></div><div><dt>State</dt><dd>{{ environment.is_active|yesno:"Active,Inactive" }}</dd></div><div><dt>Created</dt><dd>{{ environment.created_at }} by {{ environment.created_by.username }}</dd></div></dl>
+<div class="table-wrap"><h2>Targets</h2><table><thead><tr><th>Target</th><th>Product</th><th>State</th></tr></thead><tbody>{% for target in targets %}<tr><td><a href="{% url 'target-detail' target.slug %}">{{ target.display_name }}</a></td><td>{{ target.product.display_name }}</td><td>{{ target.is_active|yesno:"Active,Inactive" }}</td></tr>{% empty %}<tr><td colspan="3">No targets.</td></tr>{% endfor %}</tbody></table></div>
+{% if fixtures %}<div class="table-wrap"><h2>Historical fixtures</h2><table><thead><tr><th>ID</th><th>Name</th><th>Window</th></tr></thead><tbody>{% for fixture in fixtures %}<tr><td>{{ fixture.stable_id }}</td><td>{{ fixture.name }}</td><td>{{ fixture.window_start }} — {{ fixture.window_end }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}</section>
+{% endblock %}

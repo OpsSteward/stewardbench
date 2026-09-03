@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Tags · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs">Catalog / Tags</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><h1>Tags</h1><p>Lightweight optional Unicode labels.</p></div>{% if user.is_stewardbench_admin %}<a class="button primary" href="{% url 'tag-create' %}">Create tag</a>{% endif %}</header>
+<section class="panel table-wrap"><table><thead><tr><th>Name</th><th>Questions</th><th>Created by</th></tr></thead><tbody>{% for tag in tags %}<tr><td>{{ tag.name }}</td><td>{{ tag.questions.count }}</td><td>{{ tag.created_by.username }}</td></tr>{% empty %}<tr><td colspan="3">No tags configured.</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

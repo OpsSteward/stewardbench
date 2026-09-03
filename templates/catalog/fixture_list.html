@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Historical fixtures · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs">Catalog / Historical fixtures</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between"><div><h1>Historical fixtures</h1><p>Optional reproducible input context—not an operational snapshot or answer oracle.</p></div>{% if user.is_stewardbench_admin %}<a class="button primary" href="{% url 'fixture-create' %}">Create fixture</a>{% endif %}</header>
+<section class="panel table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Environment</th><th>Window</th><th>Tags</th><th>State</th></tr></thead><tbody>{% for fixture in fixtures %}<tr><td>{{ fixture.stable_id }}</td><td>{{ fixture.name }}</td><td><a href="{% url 'environment-detail' fixture.environment.slug %}">{{ fixture.environment.display_name }}</a></td><td>{{ fixture.window_start }} — {{ fixture.window_end }}</td><td>{% for tag in fixture.tags.all %}<span class="badge">{{ tag.name }}</span> {% empty %}—{% endfor %}</td><td>{{ fixture.is_active|yesno:"Active,Inactive" }}</td></tr>{% empty %}<tr><td colspan="6">No historical fixtures configured. This does not block the catalog.</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

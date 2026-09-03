@@ -3,9 +3,9 @@
 {% block breadcrumbs %}<p class="breadcrumbs" aria-label="Breadcrumb">Dashboard</p>{% endblock %}
 {% block content %}
 <header class="page-header">
-  <p class="eyebrow">M0 foundation</p>
+  <p class="eyebrow">Managed catalog</p>
   <h1>Dashboard</h1>
-  <p>StewardBench is ready for authenticated operation.</p>
+  <p>StewardBench is ready to curate product-neutral questions and targets.</p>
 </header>
 <section class="panel">
   <h2>Foundation status</h2>
@@ -13,7 +13,7 @@
     <div><dt>Signed in as</dt><dd>{{ user.username }}</dd></div>
     <div><dt>Product role</dt><dd>{{ user.role }}</dd></div>
     <div><dt>Persistence</dt><dd>PostgreSQL</dd></div>
-    <div><dt>Evaluation features</dt><dd>Not available in M0</dd></div>
+    <div><dt>Catalog</dt><dd><a href="{% url 'question-list' %}">Browse questions</a></dd></div>
   </dl>
 </section>
 {% endblock %}

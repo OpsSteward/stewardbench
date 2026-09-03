@@ -43,6 +43,7 @@ EOF
 
 compose=(docker compose --project-directory "$repository_dir" --env-file "$smoke_env" -p "$smoke_project")
 
+"${compose[@]}" build web
 "${compose[@]}" up -d db
 "${compose[@]}" run --rm web python manage.py migrate --noinput
 "${compose[@]}" run --rm -e STEWARDBENCH_ADMIN_PASSWORD web \
