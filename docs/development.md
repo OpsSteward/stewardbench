@@ -167,6 +167,45 @@ to `10`; heartbeat must be smaller than the lease. PostgreSQL's clock is used
 for lease decisions. `WORKER_POLL_SECONDS` remains a simple bounded polling
 cadence.
 
+## M5 human review and historical integrity
+
+An ADMIN can review a terminal Execution as `GOOD` or `BAD` in the execution
+workstation. A review appends an attributed `HumanReview`; correcting a prior
+judgment appends a new linked review and makes that later review the current
+projection. It never edits the captured request, response, answer, evidence,
+timing, target/build snapshot, or execution outcome. `REQUIRED`, `REVIEWED`,
+and `NONE` are a separately attributed review-workflow projection. An
+`ERROR`/`TIMEOUT` may be triaged `REVIEWED` without inventing a human GOOD/BAD.
+
+Run and Execution comments are append-only, authored, timestamped Unicode text.
+The product UI and service layer have no edit/delete path; a correction is a
+new comment. Known runtime credential values are rejected from comment text
+before persistence.
+
+Every Execution defaults to `VALID`. ADMIN may append an attributed `INVALID`
+decision and, if needed, append a later `VALID` correction. The current
+projection records invalidation actor/time while the complete decision history
+remains visible. INVALID observations and their raw evidence stay available,
+but GOOD/BAD and human-review quality metrics use only the displayed valid
+population and show the invalid count separately.
+
+`Retry` and `Rerun` always create new immutable history:
+
+- **Retry one Execution** creates a new one-question Run and Execution linked
+  to its source Run/Execution. It repeats the source's frozen QuestionVersion,
+  concrete submitted question, resolved bindings, TargetRevision/snapshot, and
+  execution policy with a new request correlation ID. The new Run takes a fresh
+  runtime-metadata observation when its worker executes.
+- **Rerun selected/all** creates a new Run linked to the completed source Run.
+  It uses the selected (or all still eligible) source Questions but follows the
+  normal current launch path, freezing current QuestionVersions, bindings, and
+  target revision independently. It never copies old comments or reviews.
+
+The workstation presents all four independent dimensions, review and validity
+history, raw evidence, related attempts, append-only comments, and a stable
+previous/next Run queue. OPERATOR may read all of this evidence but direct
+mutation POSTs are rejected server-side.
+
 The Product and Environment examples in the product definition are not loaded
 automatically. Configure them explicitly through the ADMIN UI so initial data
 is visible, reversible, and environment-appropriate. Catalog configuration

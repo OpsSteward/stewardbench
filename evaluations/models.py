@@ -56,6 +56,21 @@ class EvaluationRun(models.Model):
     next_dispatch_at = models.DateTimeField(null=True, blank=True)
     diagnostic_class = models.CharField(max_length=80, blank=True)
     diagnostic_detail = models.TextField(blank=True)
+    source_run = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="rerun_runs",
+    )
+    source_execution = models.ForeignKey(
+        "Execution",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="retry_runs",
+    )
+    retry_request_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
 
     class Meta:
         ordering = ("-created_at",)
@@ -205,6 +220,15 @@ class Execution(models.Model):
         TERMINAL = "TERMINAL", "Terminal observation persisted"
         LEGACY_UNKNOWN = "LEGACY_UNKNOWN", "Legacy interrupted work"
 
+    class ReviewState(models.TextChoices):
+        NONE = "NONE", "None"
+        REQUIRED = "REQUIRED", "Required"
+        REVIEWED = "REVIEWED", "Reviewed"
+
+    class Validity(models.TextChoices):
+        VALID = "VALID", "Valid"
+        INVALID = "INVALID", "Invalid"
+
     run = models.ForeignKey(EvaluationRun, on_delete=models.PROTECT, related_name="executions")
     question = models.ForeignKey(Question, on_delete=models.PROTECT, related_name="executions")
     question_version = models.ForeignKey(
@@ -252,6 +276,38 @@ class Execution(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    review_state = models.CharField(
+        max_length=12,
+        choices=ReviewState.choices,
+        default=ReviewState.NONE,
+    )
+    current_human_review = models.ForeignKey(
+        "HumanReview",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="current_for_executions",
+    )
+    validity = models.CharField(
+        max_length=8,
+        choices=Validity.choices,
+        default=Validity.VALID,
+    )
+    invalidated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="invalidated_executions",
+    )
+    invalidated_at = models.DateTimeField(null=True, blank=True)
+    source_execution = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="retried_executions",
+    )
 
     class Meta:
         ordering = ("run", "question_order")
@@ -298,6 +354,14 @@ class Execution(models.Model):
                     )
                 ),
                 name="evaluations_execution_claim_state",
+            ),
+            models.CheckConstraint(
+                condition=Q(review_state__in=("NONE", "REQUIRED", "REVIEWED")),
+                name="evaluations_execution_review_state",
+            ),
+            models.CheckConstraint(
+                condition=Q(validity__in=("VALID", "INVALID")),
+                name="evaluations_execution_validity",
             ),
         ]
         indexes = [
@@ -353,3 +417,239 @@ class ResolvedBinding(models.Model):
         if not self._state.adding:
             raise ValidationError("Resolved bindings are immutable.")
         return super().save(*args, **kwargs)
+
+
+class Comment(models.Model):
+    """Append-only operational context for exactly one Run or Execution."""
+
+    run = models.ForeignKey(
+        EvaluationRun,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="comments",
+    )
+    execution = models.ForeignKey(
+        Execution,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="comments",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="stewardbench_comments",
+    )
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(run__isnull=False, execution__isnull=True)
+                    | Q(run__isnull=True, execution__isnull=False)
+                ),
+                name="evaluations_comment_one_parent",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Comments are append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Comments are append-only and cannot be deleted.")
+
+
+class HumanReview(models.Model):
+    """One immutable judgment event; the Execution points to the current event."""
+
+    class Judgment(models.TextChoices):
+        GOOD = "GOOD", "Good"
+        BAD = "BAD", "Bad"
+
+    execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="review_history",
+    )
+    judgment = models.CharField(max_length=4, choices=Judgment.choices)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="human_reviews",
+    )
+    reviewed_at = models.DateTimeField(auto_now_add=True)
+    supersedes = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="corrections",
+    )
+    comment = models.ForeignKey(
+        Comment,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="review_events",
+    )
+
+    class Meta:
+        ordering = ("reviewed_at", "id")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Human reviews are immutable; append a correction review instead.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Human reviews are append-only and cannot be deleted.")
+
+
+class ReviewTracking(models.Model):
+    """Attributed state-history for the independent review-workflow projection."""
+
+    execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="review_tracking_events",
+    )
+    state = models.CharField(max_length=12, choices=Execution.ReviewState.choices)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="review_tracking_events",
+    )
+    cause = models.CharField(max_length=160, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Review tracking is append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Review tracking is append-only and cannot be deleted.")
+
+
+class ExecutionValidityDecision(models.Model):
+    """Append-only attributed validity decision with a current Execution projection."""
+
+    execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="validity_history",
+    )
+    validity = models.CharField(max_length=8, choices=Execution.Validity.choices)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="execution_validity_decisions",
+    )
+    decided_at = models.DateTimeField(auto_now_add=True)
+    supersedes = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="corrections",
+    )
+    comment = models.ForeignKey(
+        Comment,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="validity_decisions",
+    )
+
+    class Meta:
+        ordering = ("decided_at", "id")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Validity decisions are immutable; append a correction decision instead.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Validity decisions are append-only and cannot be deleted.")
+
+
+class AutomatedEvaluationResult(models.Model):
+    """M5 storage envelope only; evaluator invocation belongs to M9."""
+
+    class Status(models.TextChoices):
+        COMPLETE = "COMPLETE", "Complete"
+        ERROR = "ERROR", "Error"
+
+    class Outcome(models.TextChoices):
+        PASS = "PASS", "Pass"
+        FAIL = "FAIL", "Fail"
+        CANNOT_CONCLUDE = "CANNOT_CONCLUDE", "Cannot conclude"
+
+    execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="automated_results",
+    )
+    evaluator_key = models.CharField(max_length=100)
+    evaluator_version = models.CharField(max_length=80)
+    status = models.CharField(max_length=12, choices=Status.choices)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices, blank=True)
+    details = models.JSONField(default=dict, blank=True)
+    error_detail = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Automated evaluation results are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Automated evaluation results are immutable and cannot be deleted.")
+
+
+class LLMJudgeResult(models.Model):
+    """M5 storage envelope only; judge invocation belongs to M9."""
+
+    class Status(models.TextChoices):
+        COMPLETE = "COMPLETE", "Complete"
+        ERROR = "ERROR", "Error"
+
+    execution = models.ForeignKey(
+        Execution,
+        on_delete=models.PROTECT,
+        related_name="llm_judge_results",
+    )
+    provider = models.CharField(max_length=100)
+    model_identifier = models.CharField(max_length=160)
+    judge_version = models.CharField(max_length=80)
+    prompt_version = models.CharField(max_length=80)
+    status = models.CharField(max_length=12, choices=Status.choices)
+    dimensions = models.JSONField(default=dict, blank=True)
+    details = models.JSONField(default=dict, blank=True)
+    error_detail = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("LLM judge results are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("LLM judge results are immutable and cannot be deleted.")

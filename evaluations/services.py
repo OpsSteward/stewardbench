@@ -19,7 +19,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 
@@ -27,7 +27,17 @@ from accounts.policy import require_admin
 from catalog.models import EvaluationTarget, Question, TargetRevision
 
 from .adapters import AdapterFailure, TargetTimeout, adapter_for, resolve_credential
-from .models import BuildSnapshot, EvaluationRun, Execution, ResolvedBinding, TargetSnapshot
+from .models import (
+    BuildSnapshot,
+    Comment,
+    EvaluationRun,
+    Execution,
+    ExecutionValidityDecision,
+    HumanReview,
+    ResolvedBinding,
+    ReviewTracking,
+    TargetSnapshot,
+)
 
 
 logger = logging.getLogger("stewardbench.worker")
@@ -133,10 +143,13 @@ def launch_run(
     select_all=False,
     filters=None,
     execution_mode: str | None = None,
+    source_run: EvaluationRun | None = None,
 ):
     """Persist the entire immutable manifest before a worker sees any work."""
 
     require_admin(actor)
+    if source_run is not None and not source_run.is_terminal:
+        raise ValidationError("Only a completed source run can be rerun.")
     locked_target = EvaluationTarget.objects.select_for_update().select_related(
         "product", "environment"
     ).get(pk=target.pk)
@@ -187,6 +200,7 @@ def launch_run(
         inter_question_delay_seconds=revision.inter_question_delay_seconds,
         total_planned=len(selected),
         selection_filter={"select_all_matching": bool(select_all), **filters},
+        source_run=source_run,
     )
     target_snapshot = TargetSnapshot.objects.create(run=run, **_target_snapshot_values(locked_target, revision))
     build_snapshot = BuildSnapshot.objects.create(
@@ -254,6 +268,336 @@ def run_progress(run: EvaluationRun) -> dict[str, int]:
         "completed": success + errors + timeout,
         "elapsed_seconds": max(0, elapsed_seconds),
     }
+
+
+def run_review_metrics(run: EvaluationRun) -> dict[str, int]:
+    """Return transparent M5 review metrics from the valid quality population.
+
+    INVALID observations remain in the Run and review history, but are excluded
+    from the human GOOD/BAD/reviewed/unreviewed quality counters.
+    """
+
+    executions = run.executions.all()
+    valid = executions.filter(validity=Execution.Validity.VALID)
+    return {
+        "total": executions.count(),
+        "valid": valid.count(),
+        "invalid": executions.filter(validity=Execution.Validity.INVALID).count(),
+        "human_reviewed": valid.filter(current_human_review__isnull=False).count(),
+        "unreviewed": valid.filter(current_human_review__isnull=True).count(),
+        "good": valid.filter(current_human_review__judgment=HumanReview.Judgment.GOOD).count(),
+        "bad": valid.filter(current_human_review__judgment=HumanReview.Judgment.BAD).count(),
+        "review_required": executions.filter(review_state=Execution.ReviewState.REQUIRED).count(),
+    }
+
+
+def _runtime_secret_values() -> tuple[str, ...]:
+    """Known runtime credentials must never be persisted in reviewer text."""
+
+    return tuple(
+        value
+        for name, value in os.environ.items()
+        if name.startswith("STEWARD_BENCH_TARGET_CREDENTIAL_") and value
+    )
+
+
+def _validate_comment_text(text: str) -> str:
+    if not isinstance(text, str) or not text.strip():
+        raise ValidationError("A non-empty comment is required.")
+    if any(secret in text for secret in _runtime_secret_values()):
+        raise ValidationError("Comments must not contain a configured runtime credential.")
+    return text
+
+
+def append_run_comment(*, actor, run: EvaluationRun, text: str) -> Comment:
+    require_admin(actor)
+    _validate_comment_text(text)
+    return Comment.objects.create(run=run, author=actor, text=text)
+
+
+def append_execution_comment(*, actor, execution: Execution, text: str) -> Comment:
+    require_admin(actor)
+    _validate_comment_text(text)
+    return Comment.objects.create(execution=execution, author=actor, text=text)
+
+
+def _require_terminal_for_review(execution: Execution):
+    if not execution.is_terminal:
+        raise ValidationError("Human review is available only after an Execution reaches a terminal outcome.")
+
+
+@transaction.atomic
+def set_review_state(*, actor, execution: Execution, state: str, cause: str = "") -> ReviewTracking | None:
+    """Append an attributed review-state event and update only its projection."""
+
+    require_admin(actor)
+    if state not in Execution.ReviewState.values:
+        raise ValidationError("The requested review state is not supported.")
+    locked = Execution.objects.select_for_update().get(pk=execution.pk)
+    _require_terminal_for_review(locked)
+    if locked.review_state == state:
+        return None
+    event = ReviewTracking.objects.create(
+        execution=locked,
+        state=state,
+        actor=actor,
+        cause=cause,
+    )
+    # ``review_state`` is an M5 projection, not captured target evidence.  The
+    # terminal Execution model deliberately rejects ``save()`` to protect the
+    # observation, so projections are updated only in this service transaction.
+    Execution.objects.filter(pk=locked.pk).update(review_state=state)
+    locked.review_state = state
+    return event
+
+
+def mark_review_required(*, actor, execution: Execution, cause: str = "Manual review required"):
+    return set_review_state(
+        actor=actor,
+        execution=execution,
+        state=Execution.ReviewState.REQUIRED,
+        cause=cause,
+    )
+
+
+def mark_reviewed_without_judgment(*, actor, execution: Execution, comment_text: str = ""):
+    """Triage a terminal infrastructure outcome without fabricating GOOD/BAD."""
+
+    require_admin(actor)
+    if execution.outcome not in {Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT}:
+        raise ValidationError(
+            "Judgmentless REVIEWED triage is only available for terminal ERROR or TIMEOUT observations."
+        )
+    comment = append_execution_comment(actor=actor, execution=execution, text=comment_text) if comment_text else None
+    event = set_review_state(
+        actor=actor,
+        execution=execution,
+        state=Execution.ReviewState.REVIEWED,
+        cause="Infrastructure triage without human judgment",
+    )
+    return event, comment
+
+
+@transaction.atomic
+def record_human_review(*, actor, execution: Execution, judgment: str, comment_text: str = "") -> HumanReview:
+    """Append a GOOD/BAD event and set the current review/judgment projections."""
+
+    require_admin(actor)
+    if judgment not in HumanReview.Judgment.values:
+        raise ValidationError("Human judgment must be GOOD or BAD.")
+    # PostgreSQL cannot lock the nullable outer side created by
+    # ``select_related(current_human_review)``.  Locking the Execution itself
+    # serializes the current-review projection transition; read the optional
+    # prior review separately while that row lock is held.
+    locked = Execution.objects.select_for_update().get(pk=execution.pk)
+    _require_terminal_for_review(locked)
+    comment = None
+    if comment_text:
+        _validate_comment_text(comment_text)
+        comment = Comment.objects.create(execution=locked, author=actor, text=comment_text)
+    review = HumanReview.objects.create(
+        execution=locked,
+        judgment=judgment,
+        reviewed_by=actor,
+        supersedes=locked.current_human_review,
+        comment=comment,
+    )
+    if locked.review_state != Execution.ReviewState.REVIEWED:
+        ReviewTracking.objects.create(
+            execution=locked,
+            state=Execution.ReviewState.REVIEWED,
+            actor=actor,
+            cause="Human GOOD/BAD review",
+        )
+    Execution.objects.filter(pk=locked.pk).update(
+        current_human_review=review,
+        review_state=Execution.ReviewState.REVIEWED,
+    )
+    return review
+
+
+@transaction.atomic
+def set_execution_validity(*, actor, execution: Execution, validity: str, comment_text: str = ""):
+    """Append an attributed VALID/INVALID decision; never erase the source observation."""
+
+    require_admin(actor)
+    if validity not in Execution.Validity.values:
+        raise ValidationError("The requested validity state is not supported.")
+    locked = Execution.objects.select_for_update().get(pk=execution.pk)
+    _require_terminal_for_review(locked)
+    if locked.validity == validity:
+        return None
+    comment = None
+    if comment_text:
+        _validate_comment_text(comment_text)
+        comment = Comment.objects.create(execution=locked, author=actor, text=comment_text)
+    previous = locked.validity_history.order_by("-decided_at", "-id").first()
+    decision = ExecutionValidityDecision.objects.create(
+        execution=locked,
+        validity=validity,
+        decided_by=actor,
+        supersedes=previous,
+        comment=comment,
+    )
+    values = {"validity": validity}
+    if validity == Execution.Validity.INVALID:
+        values.update({"invalidated_by": actor, "invalidated_at": decision.decided_at})
+    else:
+        values.update({"invalidated_by": None, "invalidated_at": None})
+    Execution.objects.filter(pk=locked.pk).update(**values)
+    return decision
+
+
+def _create_retry_run(*, actor, source: Execution, retry_request_key: uuid.UUID | None = None) -> EvaluationRun:
+    """Create a one-item exact replay of a terminal source Execution.
+
+    Retry intentionally reuses the source QuestionVersion, concrete submitted
+    question, resolved bindings, TargetRevision, and frozen launch policy.  It
+    creates fresh snapshots, a fresh request correlation ID, and a new Run so a
+    later target call is a distinct historical observation.
+    """
+
+    source_run = source.run
+    source_target = source.target_snapshot
+    run = EvaluationRun.objects.create(
+        target=source_run.target,
+        target_revision=source.target_revision,
+        launched_by=actor,
+        requested_mode=source_run.requested_mode,
+        configured_max_concurrency=source_run.configured_max_concurrency,
+        actual_concurrency=1,
+        question_timeout_seconds=source_run.question_timeout_seconds,
+        inter_question_delay_seconds=source_run.inter_question_delay_seconds,
+        total_planned=1,
+        selection_filter={"retry_of_execution": source.pk, "frozen_execution_inputs": True},
+        source_run=source_run,
+        source_execution=source,
+        retry_request_key=retry_request_key,
+    )
+    target_snapshot = TargetSnapshot.objects.create(
+        run=run,
+        target=source_target.target,
+        target_revision=source_target.target_revision,
+        target_display_name=source_target.target_display_name,
+        product_display_name=source_target.product_display_name,
+        environment_display_name=source_target.environment_display_name,
+        endpoint=source_target.endpoint,
+        adapter_key=source_target.adapter_key,
+        adapter_version=source_target.adapter_version,
+        credential_reference=source_target.credential_reference,
+        classification=source_target.classification,
+        supports_runtime_metadata=source_target.supports_runtime_metadata,
+    )
+    source_build = source.build_snapshot
+    build_snapshot = BuildSnapshot.objects.create(
+        run=run,
+        declared_product_version=source_build.declared_product_version,
+        declared_build_id=source_build.declared_build_id,
+        declared_git_sha=source_build.declared_git_sha,
+    )
+    retry = Execution.objects.create(
+        run=run,
+        question=source.question,
+        question_version=source.question_version,
+        target_revision=source.target_revision,
+        target_snapshot=target_snapshot,
+        build_snapshot=build_snapshot,
+        source_execution=source,
+        question_order=1,
+        question_stable_id=source.question_stable_id,
+        question_version_number=source.question_version_number,
+        question_template=source.question_template,
+        submitted_question=source.submitted_question,
+        adapter_key=source.adapter_key,
+        adapter_version=source.adapter_version,
+        normalizer_key=source.normalizer_key,
+        normalizer_version=source.normalizer_version,
+        preflight_error_class=source.preflight_error_class,
+        preflight_error_detail=source.preflight_error_detail,
+    )
+    ResolvedBinding.objects.bulk_create(
+        [
+            ResolvedBinding(
+                execution=retry,
+                name=binding.name,
+                resolution_mode=binding.resolution_mode,
+                value=binding.value,
+                display_value=binding.display_value,
+            )
+            for binding in source.resolved_bindings.all()
+        ]
+    )
+    return run
+
+
+def retry_execution(*, actor, execution: Execution, retry_request_key: uuid.UUID | str | None = None) -> EvaluationRun:
+    """Create, but never append to, a deliberate new one-execution retry Run."""
+
+    require_admin(actor)
+    key = None
+    if retry_request_key:
+        try:
+            key = uuid.UUID(str(retry_request_key))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Retry request token is invalid.") from exc
+        existing = EvaluationRun.objects.filter(retry_request_key=key).first()
+        if existing:
+            return existing
+    try:
+        with transaction.atomic():
+            source = (
+                Execution.objects.select_for_update()
+                .select_related("run", "target_snapshot", "build_snapshot", "question", "question_version")
+                .prefetch_related("resolved_bindings")
+                .get(pk=execution.pk)
+            )
+            _require_terminal_for_review(source)
+            return _create_retry_run(actor=actor, source=source, retry_request_key=key)
+    except IntegrityError:
+        if key:
+            return EvaluationRun.objects.get(retry_request_key=key)
+        raise
+
+
+@transaction.atomic
+def rerun_source_run(
+    *,
+    actor,
+    source_run: EvaluationRun,
+    source_execution_ids: Iterable[int] | None = None,
+) -> EvaluationRun:
+    """Create a normal independently-frozen run from selected/all source items.
+
+    Unlike retry, rerun follows normal current launch semantics for the source
+    selection: only source Questions still eligible for a normal run are used,
+    and ``launch_run`` freezes the current QuestionVersion/bindings/target
+    revision afresh.  Existing comments and reviews are deliberately not copied.
+    """
+
+    require_admin(actor)
+    locked_run = EvaluationRun.objects.select_for_update().get(pk=source_run.pk)
+    if not locked_run.is_terminal:
+        raise ValidationError("Only a completed Run can be rerun.")
+    source_executions = locked_run.executions.order_by("question_order")
+    if source_execution_ids is not None:
+        requested = {int(value) for value in source_execution_ids}
+        selected_source = list(source_executions.filter(pk__in=requested))
+        if not requested or len(selected_source) != len(requested):
+            raise ValidationError("Select one or more Executions from the completed source Run.")
+    else:
+        selected_source = list(source_executions)
+    source_question_ids = {item.question_id for item in selected_source}
+    eligible_ids = list(_eligible_questions().filter(pk__in=source_question_ids).values_list("pk", flat=True))
+    if not eligible_ids:
+        raise ValidationError("No selected source Questions are currently eligible for a normal rerun.")
+    if source_execution_ids is not None and len(eligible_ids) != len(source_question_ids):
+        raise ValidationError("Every selected source Question must still be eligible for a normal rerun.")
+    return launch_run(
+        actor=actor,
+        target=locked_run.target,
+        question_ids=eligible_ids,
+        source_run=locked_run,
+    )
 
 
 def _set_run_started(run: EvaluationRun, now):

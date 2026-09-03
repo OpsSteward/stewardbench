@@ -9,9 +9,6 @@ from django.utils import timezone
 
 from catalog.models import TargetRevision
 from catalog.services import create_target_revision
-from evaluations.models import EvaluationRun, Execution
-
-
 M3 = ("evaluations", "0001_m3_durable_execution")
 M4 = ("evaluations", "0002_remove_evaluationrun_evaluations_m3_sequential_only_and_more")
 
@@ -138,9 +135,12 @@ def test_m4_migration_preserves_populated_m3_terminal_observations(minimal_domai
     # graph state reflect the supported M3 upgrade starting point.
     executor = MigrationExecutor(connection)
     executor.migrate([M4])
+    m4_apps = executor.loader.project_state([M4]).apps
+    M4Execution = m4_apps.get_model("evaluations", "Execution")
+    M4Run = m4_apps.get_model("evaluations", "EvaluationRun")
 
     preserved = list(
-        Execution.objects.filter(run_id=old_run.pk)
+        M4Execution.objects.filter(run_id=old_run.pk)
         .order_by("question_order")
         .values_list(
             "outcome",
@@ -154,9 +154,9 @@ def test_m4_migration_preserves_populated_m3_terminal_observations(minimal_domai
         )
     )
     assert preserved == before
-    upgraded = list(Execution.objects.filter(run_id=old_run.pk).order_by("question_order"))
-    assert all(item.target_call_phase == Execution.TargetCallPhase.NONE for item in upgraded)
+    upgraded = list(M4Execution.objects.filter(run_id=old_run.pk).order_by("question_order"))
+    assert all(item.target_call_phase == "NONE" for item in upgraded)
     assert all(item.claim_worker_id == "" and item.claim_token is None for item in upgraded)
-    upgraded_run = EvaluationRun.objects.get(pk=old_run.pk)
-    assert upgraded_run.state == EvaluationRun.State.COMPLETED_WITH_ERRORS
+    upgraded_run = M4Run.objects.get(pk=old_run.pk)
+    assert upgraded_run.state == "COMPLETED_WITH_ERRORS"
     assert upgraded_run.next_dispatch_at is None

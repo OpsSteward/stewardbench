@@ -36,8 +36,9 @@ immutable source provenance, deterministic draft Questions, and visibly
 uncontrolled legacy observations. M3 adds frozen Run/Execution capture through
 the deterministic fake-target adapter. M4 hardens it with PostgreSQL claim
 leases, multiple workers, sequential or bounded parallel execution,
-target-revision-wide capacity, and conservative ambiguous-call recovery. Human
-review, retries, baselines, comparison, and real OpsSteward wire-contract
+target-revision-wide capacity, and conservative ambiguous-call recovery. M5
+adds attributed append-only human review, comments, validity decisions, and
+retry/rerun history. Baselines, comparison, and real OpsSteward wire-contract
 certification remain later milestones.
 
 ## Run with Docker
