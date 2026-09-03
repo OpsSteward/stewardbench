@@ -308,8 +308,8 @@ define the independent acceptance harness.
 
 This selection does not decide:
 
-- run cancellation, which remains a product-owner choice; pause/resume remains
-  out of scope;
+- run cancellation, which the product owner subsequently deferred from v1;
+  pause/resume remains out of scope;
 - the exact Django/Python patch pins, production HTTP server, HTTP client,
   stylesheet system, chart library, or HTMX version;
 - semantic comparator or LLM-judge provider/model/prompt;

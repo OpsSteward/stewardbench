@@ -35,8 +35,9 @@ must permit Kubernetes deployment in v2 without redesigning the domain.
 - Process death must be detected and reconciled without overwriting captured
   answers or silently duplicating terminal observations.
 - Kubernetes manifests and production orchestration are out of v1.
-- Whether cooperative cancellation is inexpensive enough for v1 remains an
-  explicit product/framework-phase question; pause/resume is excluded.
+- A subsequent product-owner decision deferred run cancellation from v1 unless
+  later worker evidence shows safe cooperative cancellation is effectively free;
+  pause/resume is excluded.
 
 See [Architecture](../architecture.md),
 [Framework decision inputs](../framework-decision-input.md), and

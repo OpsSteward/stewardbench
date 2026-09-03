@@ -208,8 +208,8 @@ For a running run, a polling-updated progress panel shows:
 - elapsed time.
 
 WebSockets are not required. The page may be left and revisited without losing
-state. If cancellation is later accepted for v1, show one clear cooperative
-cancel action and consequences; do not add pause/resume.
+state. Cancellation and pause/resume are not shown because they are deferred
+from v1.
 
 The execution table provides selection, filters, attention-first sorting,
 human/evaluator/change/review/validity columns, and links to the review

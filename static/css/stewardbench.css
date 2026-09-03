@@ -1,0 +1,65 @@
+:root {
+  color-scheme: light;
+  --navy: #10263f;
+  --navy-soft: #173b60;
+  --blue: #1769aa;
+  --surface: #ffffff;
+  --canvas: #f3f6f9;
+  --border: #d8e0e8;
+  --text: #182532;
+  --muted: #5e6e7d;
+  --danger: #9c2d2d;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--text); font: 15px/1.5 Inter, "Source Sans 3", system-ui, sans-serif; }
+a { color: var(--blue); }
+.app-shell { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
+.sidebar { display: flex; flex-direction: column; gap: 30px; padding: 24px 18px; background: var(--navy); color: white; }
+.brand { color: white; text-decoration: none; }
+.wordmark { display: block; font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
+.descriptor { display: block; margin-top: 3px; color: #bbcad8; font-size: 11px; line-height: 1.35; }
+nav { display: grid; gap: 5px; }
+.nav-link { padding: 9px 11px; border-radius: 5px; color: #e6eef5; text-decoration: none; }
+.nav-link:hover, .nav-link:focus { background: var(--navy-soft); }
+.account-panel { display: grid; gap: 8px; margin-top: auto; padding-top: 18px; border-top: 1px solid #36526d; }
+.role-badge { display: inline-block; width: fit-content; padding: 2px 7px; border-radius: 999px; background: #e8eff6; color: #23425e; font-size: 12px; font-weight: 700; }
+.account-panel .role-badge { background: #294c6d; color: white; }
+.link-button { padding: 0; border: 0; background: none; color: #c9d8e6; cursor: pointer; text-decoration: underline; }
+.content { padding: 30px 38px; }
+.breadcrumbs { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+.page-header { margin-bottom: 22px; }
+.page-header h1 { margin: 0; font-size: 30px; }
+.page-header p:last-child { margin-bottom: 0; color: var(--muted); }
+.eyebrow { margin: 0 0 3px; color: var(--blue); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.row-between { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+.panel { padding: 22px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: 0 1px 2px rgb(16 38 63 / 5%); }
+.panel h2 { margin-top: 0; }
+.status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.status-grid div { padding: 14px; border: 1px solid var(--border); border-radius: 5px; }
+dt { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+dd { margin: 5px 0 0; font-weight: 650; }
+.button { display: inline-block; padding: 8px 13px; border: 1px solid var(--border); border-radius: 5px; background: white; color: var(--text); cursor: pointer; text-decoration: none; }
+.button.primary { border-color: var(--blue); background: var(--blue); color: white; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 11px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+tbody tr:last-child td { border-bottom: 0; }
+.form-panel { max-width: 680px; }
+.field { display: grid; gap: 5px; margin-bottom: 17px; }
+.field label { font-weight: 700; }
+.field input:not([type="checkbox"]), .field select { width: 100%; padding: 9px 10px; border: 1px solid #aebbc7; border-radius: 4px; font: inherit; }
+.help { margin: 0; color: var(--muted); font-size: 12px; }
+.error, .errorlist { color: var(--danger); }
+.actions { display: flex; gap: 10px; }
+.message { padding: 10px 12px; border-left: 4px solid var(--blue); background: white; }
+.login-panel { max-width: 430px; margin: 10vh auto; padding: 28px; border: 1px solid var(--border); border-radius: 7px; background: white; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 760px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { min-height: auto; }
+  .account-panel { margin-top: 0; }
+  .content { padding: 24px 18px; }
+  .status-grid { grid-template-columns: 1fr; }
+}

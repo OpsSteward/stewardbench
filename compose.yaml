@@ -1,0 +1,62 @@
+name: stewardbench
+
+x-app: &app
+  build:
+    context: .
+    args:
+      STEWARDBENCH_INSTALL_TEST_DEPS: "true"
+  image: stewardbench:local
+  environment:
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
+    DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
+    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+    DJANGO_SECURE_COOKIES: ${DJANGO_SECURE_COOKIES:-true}
+    DJANGO_SECURE_SSL_REDIRECT: ${DJANGO_SECURE_SSL_REDIRECT:-false}
+    POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+    POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  web:
+    <<: *app
+    ports:
+      - "${STEWARD_WEB_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "manage.py", "check_database"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  worker:
+    <<: *app
+    command: ["python", "manage.py", "run_worker"]
+    healthcheck:
+      test: ["CMD", "python", "manage.py", "check_database"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  postgres_data:

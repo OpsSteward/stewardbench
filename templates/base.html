@@ -1,0 +1,45 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}StewardBench{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/stewardbench.css' %}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="{% url 'dashboard' %}">
+        <span class="wordmark">StewardBench</span>
+        <span class="descriptor">AI Network Operations Evaluation Platform</span>
+      </a>
+      {% if user.is_authenticated %}
+        <nav aria-label="Primary navigation">
+          <a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+          {% if user.is_stewardbench_admin %}
+            <a class="nav-link" href="{% url 'user-list' %}">Users</a>
+          {% endif %}
+        </nav>
+        <div class="account-panel">
+          <span>{{ user.username }}</span>
+          <span class="role-badge">{{ user.role }}</span>
+          <form method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button class="link-button" type="submit">Log out</button>
+          </form>
+        </div>
+      {% endif %}
+    </aside>
+    <main class="content">
+      {% if messages %}
+        <div aria-live="polite">
+          {% for message in messages %}<p class="message">{{ message }}</p>{% endfor %}
+        </div>
+      {% endif %}
+      {% block breadcrumbs %}{% endblock %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

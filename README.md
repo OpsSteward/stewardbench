@@ -30,10 +30,48 @@ a baseline is observed historical performance—not universal ground truth.
 
 ## Status
 
-StewardBench has a documented **product and architecture foundation**, including
-the selected v1 application architecture. This repository still contains
-documentation/reference material only; no application implementation has
-begun.
+M0 provides the runnable authenticated foundation: Django 5.2, PostgreSQL-only
+persistence, Docker web/worker/database processes, local authentication,
+ADMIN/OPERATOR authorization, user administration, and the operational shell.
+Evaluation catalog and execution capabilities intentionally begin in later,
+separately authorized milestones.
+
+## Run M0 with Docker
+
+Requirements: Docker Engine with Compose, and a shell for generating local
+secret values.
+
+```bash
+cp .env.example .env
+python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
+
+Put the generated value in `.env` as `DJANGO_SECRET_KEY` and replace the example
+database password. Then build, start PostgreSQL, apply migrations explicitly,
+bootstrap the first product ADMIN, and start the two application processes:
+
+```bash
+docker compose build
+docker compose up -d db
+docker compose run --rm web python manage.py migrate --noinput
+docker compose run --rm -e STEWARDBENCH_ADMIN_PASSWORD web \
+  python manage.py create_stewardbench_admin \
+  --username your-admin --password-env STEWARDBENCH_ADMIN_PASSWORD
+docker compose up -d web worker
+```
+
+The bootstrap command reads `STEWARDBENCH_ADMIN_PASSWORD` from the invoking
+shell without printing it. Omitting `--password-env` uses a hidden interactive
+prompt instead. The command refuses to create another account when an ADMIN
+already exists and never changes an existing account.
+
+Open <http://localhost:8000/>. After login, an ADMIN can create, activate,
+deactivate, re-role, and reset passwords for later users from **Users**.
+OPERATOR accounts can enter the application but have no administrative mutation
+access.
+
+See [development and deployment instructions](docs/development.md) for checks,
+configuration, the worker foundation, Docker smoke, and DGX guidance.
 
 ## Documentation
 
@@ -68,7 +106,7 @@ begun.
 
 See the [roadmap](docs/roadmap.md) for authoritative boundaries. The framework
 and future executable acceptance-harness architectures are now documented.
-The authoritative v1 implementation milestone plan now pairs each product
-increment with development tests and independent acceptance scenarios. No
-application implementation has begun. The repository-specific development and
-independent QA/acceptance skills govern those later implementation sessions.
+The authoritative v1 implementation milestone plan pairs each product increment
+with development tests and independent acceptance scenarios. M0 is the only
+implemented milestone. The repository-specific development and independent
+QA/acceptance skills govern implementation and acceptance work.

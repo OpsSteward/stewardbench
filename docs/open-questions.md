@@ -22,22 +22,22 @@ changes the specified behavior.
    are one accidentally split question and how the `Interface Issues` sheet is
    retained. Do not resolve these by inference in an importer.
 
-## Product-owner choice
+## Resolved product-owner choices
 
-4. **Run cancellation in v1.** A simple cooperative cancel could be useful for a
-   long run, but introduces worker state and unstarted-item semantics. Decide
-   through product-owner review whether it is sufficiently valuable for v1. If
-   omitted, make the deferral explicit in UI copy. Pause/resume remains out of
-   scope either way.
+- **Run cancellation is deferred from v1 (2026-09-03).** It is not an M0
+  requirement and must not block M3. Pause/resume also remains out of v1. If
+  later worker evidence shows safe cooperative cancellation is effectively free,
+  adding it still requires reviewed lifecycle/evidence semantics and acceptance
+  coverage before implementation.
 
 ## Later technology decisions
 
-5. **Semantic comparator implementation/model/provider.** Select only after
+4. **Semantic comparator implementation/model/provider.** Select only after
    obtaining representative response pairs and defining an evaluation set for
    dangerous false-equivalence behavior.
-6. **LLM judge implementation/model/provider and initial rubric prompt.** The
+5. **LLM judge implementation/model/provider and initial rubric prompt.** The
    interface and retention requirements are set, but the provider/model are not.
-7. **Final brand source artwork.** The identity is approved, but final vector
+6. **Final brand source artwork.** The identity is approved, but final vector
    geometry, spacing, variants, and palette reference values require approved
    source assets.
 
@@ -47,17 +47,17 @@ The harness architecture and initial scenario catalog are settled in
 [Executable acceptance harness design](acceptance-harness-design.md). Later
 implementation must select:
 
-8. **Cross-platform worker process control.** Choose deterministic crash/barrier
+7. **Cross-platform worker process control.** Choose deterministic crash/barrier
    primitives that work for Linux CI, macOS development, and Docker.
-9. **Fake-target implementation dependency.** Choose the minimal Python HTTP
+8. **Fake-target implementation dependency.** Choose the minimal Python HTTP
    library and packaging command for the already-decided reusable service
    contract.
-10. **Playwright browser matrix.** Decide the smallest supported matrix beyond
+9. **Playwright browser matrix.** Decide the smallest supported matrix beyond
     the initial Chromium path, based on actual deployment needs.
-11. **Docker smoke orchestration.** Decide whether Compose is invoked directly
+10. **Docker smoke orchestration.** Decide whether Compose is invoked directly
     or coordinated through pytest while keeping independently reproducible
     steps.
-12. **Structured acceptance output.** Choose the compact machine-readable
+11. **Structured acceptance output.** Choose the compact machine-readable
     format accompanying pytest/JUnit and its future CI artifact-retention rule.
 
 These questions do not reopen settled decisions such as PostgreSQL-only

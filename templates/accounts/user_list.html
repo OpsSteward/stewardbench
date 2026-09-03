@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Users · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs" aria-label="Breadcrumb"><a href="{% url 'dashboard' %}">Dashboard</a> / Users</p>{% endblock %}
+{% block content %}
+<header class="page-header row-between">
+  <div><p class="eyebrow">Administration</p><h1>Users</h1></div>
+  <a class="button primary" href="{% url 'user-create' %}">Create user</a>
+</header>
+<div class="panel table-wrap">
+  <table>
+    <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>State</th><th><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>
+      {% for managed_user in users %}
+        <tr>
+          <td>{{ managed_user.username }}</td>
+          <td>{{ managed_user.email|default:"—" }}</td>
+          <td><span class="role-badge">{{ managed_user.role }}</span></td>
+          <td>{% if managed_user.is_active %}Active{% else %}Inactive{% endif %}</td>
+          <td><a href="{% url 'user-update' managed_user.pk %}">Edit</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">No users.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

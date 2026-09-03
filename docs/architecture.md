@@ -279,10 +279,9 @@ EvaluationRun processing states:
 | COMPLETED_WITH_ERRORS | Processing finished and one or more items ended in ERROR or TIMEOUT; completed observations remain usable. |
 | FAILED | A run-level infrastructure/configuration failure prevented meaningful dispatch or finalization. It is not a product-quality judgment. |
 
-`CANCELLED` is conditional on the unresolved v1 cancellation decision. If
-adopted, cancellation is cooperative: completed/in-flight observations remain,
-unstarted work is marked clearly, and the run remains historical. Pause/resume
-is not planned.
+Cancellation is deferred from v1 by product-owner decision. Pause/resume is not
+planned. A later reconsideration requires reviewed cooperative lifecycle and
+evidence semantics before adding a `CANCELLED` state.
 
 Execution processing states:
 
@@ -294,9 +293,7 @@ Execution processing states:
 | ERROR | No valid complete answer was captured because target/adapter/infrastructure handling failed. |
 | TIMEOUT | The configured question timeout elapsed. |
 
-If cancellation is selected, an explicit terminal state for unstarted cancelled
-items must be designed with it. Execution outcome never contains GOOD, BAD,
-PASS, or FAIL.
+Execution outcome never contains GOOD, BAD, PASS, or FAIL.
 
 Processing state is necessarily updated while work is active. Once an
 Execution reaches a terminal outcome, its question, request, response, evidence,

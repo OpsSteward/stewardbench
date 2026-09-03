@@ -90,9 +90,10 @@ later implementation/quality phases.
   component.
 - The web and worker process boundary maps cleanly to separate Kubernetes
   workloads in v2 without changing the domain model.
-- Exact dependency versions, HTTP/chart libraries, production web server, run
-  cancellation, evaluator providers, OpsSteward wire contracts, and future API
-  tooling remain separate decisions.
+- Exact dependency versions, HTTP/chart libraries, production web server,
+  evaluator providers, OpsSteward wire contracts, and future API tooling remain
+  separate decisions. A subsequent product-owner decision deferred run
+  cancellation from v1.
 
 ## Alternatives rejected
 
@@ -112,5 +113,5 @@ later implementation/quality phases.
   already modeled durably in PostgreSQL.
 
 This ADR refines, and does not supersede, [ADR 0004](0004-docker-v1-and-durable-background-execution.md).
-Docker remains v1, Kubernetes remains v2, and run cancellation remains
-unresolved.
+Docker remains v1 and Kubernetes remains v2. Run cancellation was subsequently
+deferred from v1 by product-owner decision.

@@ -65,8 +65,9 @@ comparison acceptance, selective browser flows, and Docker smoke. Designing or
 running this repository's own software tests does not move CI-triggered
 evaluated-product execution into v1.
 
-Run cancellation is unresolved and is listed in
-[Open questions](open-questions.md). Pause/resume is not in v1.
+Run cancellation is deferred from v1 by product-owner decision. Pause/resume is
+also not in v1. See [Open questions](open-questions.md) for the recorded
+resolution and conditions for any later reconsideration.
 
 ## StewardBench v2 — planned direction
 

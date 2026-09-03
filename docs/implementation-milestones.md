@@ -373,14 +373,11 @@ cannot exit until the required real question adapter variant(s) are certified.
 One adapter may negotiate variants only if evidence shows that is safe;
 otherwise implement separately versioned OpsSteward v1 and v2 adapters.
 
-Run cancellation has a decision deadline before M3 lifecycle migrations are
-frozen. The recommended v1 plan is to defer it: no acceptance scenario requires
-it, pause/resume is explicitly excluded, and cancellation adds in-flight and
-unstarted-item history semantics to the highest-risk worker. Because repository
-authority leaves it to the product owner, the plan records this as an explicit
-recommendation, not a silent resolution. If selected for v1, define cooperative
-state/evidence and add acceptance coverage before M3; completed and in-flight
-observations must remain preserved.
+Run cancellation is deferred from v1 by product-owner decision. It is not an M0
+requirement and must not block M3. Pause/resume is also excluded. If later worker
+evidence shows safe cooperative cancellation is effectively free, define and
+review its state/evidence semantics and acceptance coverage before adding it;
+completed and in-flight observations must remain preserved.
 
 ### M4 — Proven durable worker
 
@@ -426,8 +423,7 @@ creates an explicit ERROR and no resubmission.
 
 **Non-goals.** No broker, generic scheduling, adaptive throttling, arbitrary
 task routing, worker autoscaling, Kubernetes, silent automatic remote retry,
-pause/resume, or cancellation unless the M3 product decision explicitly added
-it and its tests.
+pause/resume, or cancellation.
 
 **Exit criteria.** All four worker scenarios PASS with real PostgreSQL and at
 least two real worker processes; sequential maximum is one; target maximum is

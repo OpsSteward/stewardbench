@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stewardbench"
+version = "0.1.0"
+description = "AI Network Operations Evaluation Platform"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "asgiref==3.12.1",
+    "Django==5.2.17",
+    "gunicorn==26.2.0",
+    "packaging==26.3",
+    "psycopg[binary]==3.3.5",
+    "sqlparse==0.6.0",
+    "typing-extensions==4.16.0",
+    "whitenoise==6.12.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "iniconfig==2.3.0",
+    "pluggy==1.6.0",
+    "Pygments==2.21.0",
+    "pytest==8.4.2",
+    "pytest-django==4.14.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["accounts*", "core*", "stewardbench*"]
+
+[tool.setuptools.package-data]
+"*" = ["templates/**/*.html", "static/**/*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "stewardbench.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "acceptance: independently mapped acceptance scenario",
+    "postgresql: requires real PostgreSQL semantics",
+]

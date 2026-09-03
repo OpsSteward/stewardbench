@@ -246,8 +246,8 @@ containing one or more selected executions. A run contains:
 - optional selected Baseline reference used to request comparison.
 
 Lifecycle states are PENDING, RUNNING, COMPLETED, COMPLETED_WITH_ERRORS, and
-FAILED. Conditional CANCELLED behavior is deferred to the open cancellation
-decision. A completed run is never reopened to append retry work.
+FAILED. Run cancellation is deferred from v1 by product-owner decision. A
+completed run is never reopened to append retry work.
 
 The plan stores total selected items even if execution rows are created lazily,
 so progress remains durable and stable.

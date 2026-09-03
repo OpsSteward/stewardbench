@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · StewardBench{% endblock %}
+{% block breadcrumbs %}<p class="breadcrumbs" aria-label="Breadcrumb">Dashboard</p>{% endblock %}
+{% block content %}
+<header class="page-header">
+  <p class="eyebrow">M0 foundation</p>
+  <h1>Dashboard</h1>
+  <p>StewardBench is ready for authenticated operation.</p>
+</header>
+<section class="panel">
+  <h2>Foundation status</h2>
+  <dl class="status-grid">
+    <div><dt>Signed in as</dt><dd>{{ user.username }}</dd></div>
+    <div><dt>Product role</dt><dd>{{ user.role }}</dd></div>
+    <div><dt>Persistence</dt><dd>PostgreSQL</dd></div>
+    <div><dt>Evaluation features</dt><dd>Not available in M0</dd></div>
+  </dl>
+</section>
+{% endblock %}
