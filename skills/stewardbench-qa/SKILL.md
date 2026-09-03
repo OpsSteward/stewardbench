@@ -488,15 +488,16 @@ untrusted-output rendering, exports, worker claiming/concurrency, immutable
 history, baseline mutation, execution validity, and migrations. This is robust
 software acceptance, not expansion into OpsSteward-Sec.
 
-## Relationship to the future harness
+## Relationship to the executable harness
 
 This skill defines acceptance principles, evidence, and reporting independent
-of any runner. A future executable harness may automate many checks, but its
-implementation and assertions must themselves be validated against repository
-authority. Do not assume a harness command exists, hard-code this workflow to an
-unapproved runner, scaffold harness infrastructure, or turn harness success
-into proof broader than its mapped requirements. Manual subsystem validation
-remains legitimate when it produces repeatable observable evidence.
+of any runner. The future harness architecture and initial catalog are defined
+in [Executable acceptance harness design](../../docs/acceptance-harness-design.md).
+Its implementation and assertions must themselves be validated against
+repository authority. Do not assume a harness command exists, scaffold harness
+infrastructure without authorization, or turn harness success into proof
+broader than its mapped requirements. Manual subsystem validation remains
+legitimate when it produces repeatable observable evidence.
 
 ## Report completion evidence
 

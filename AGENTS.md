@@ -147,6 +147,6 @@ Use the repository-specific
 [StewardBench development skill](skills/stewardbench-development/SKILL.md) for
 implementation work. Use the independent
 [StewardBench QA/acceptance skill](skills/stewardbench-qa/SKILL.md) to prove
-behavior against repository authority. The executable StewardBench acceptance
-harness remains planned; do not define or scaffold it without a separately
-authorized task.
+behavior against repository authority. The future executable harness is defined
+in [Executable acceptance harness design](docs/acceptance-harness-design.md).
+Do not implement or expand it without a separately authorized task.

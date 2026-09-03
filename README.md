@@ -50,6 +50,7 @@ begun.
 - [Target adapter contract](docs/target-adapter-contract.md)
 - [Roadmap](docs/roadmap.md)
 - [Framework selection](docs/framework-selection.md)
+- [Executable acceptance harness design](docs/acceptance-harness-design.md)
 - [Framework decision inputs](docs/framework-decision-input.md)
 - [Open questions](docs/open-questions.md)
 - [Architecture decision records](docs/adr/README.md)
@@ -64,9 +65,9 @@ begun.
 - **v3+:** possible mature automation API, user-facing CLI, release gating,
   MCP adapters, advanced regrading, and broader analytics.
 
-See the [roadmap](docs/roadmap.md) for authoritative boundaries. Next is
-product-owner review of the [framework decision](docs/framework-selection.md),
-followed by design of the executable acceptance harness and milestone
-planning—not application implementation yet. The repository-specific
-development and independent QA/acceptance skills are available for those later
-sessions.
+See the [roadmap](docs/roadmap.md) for authoritative boundaries. The framework
+and future executable acceptance-harness architectures are now documented.
+Next is a v1 implementation milestone plan pairing product work with development
+tests and acceptance scenarios—not application implementation yet. The
+repository-specific development and independent QA/acceptance skills govern
+those later sessions.

@@ -33,6 +33,7 @@ product behavior or architecture.
 | [Target adapter contract](target-adapter-contract.md) | Product-independent adapter behavior and proposed OpsSteward metadata contract |
 | [Roadmap](roadmap.md) | v1, v2, and v3+ boundaries |
 | [Framework selection](framework-selection.md) | Weighted technology comparison and selected v1 application, UI, persistence, worker, Docker, and testing architecture |
+| [Executable acceptance harness design](acceptance-harness-design.md) | Layered evidence architecture, deterministic doubles, PostgreSQL concurrency strategy, acceptance catalog, and implementation sequence |
 | [Framework decision inputs](framework-decision-input.md) | Requirements used by the completed technology-selection phase |
 | [Open questions](open-questions.md) | Only decisions that still need product-owner or integration evidence |
 | [ADRs](adr/README.md) | Durable architectural decisions |

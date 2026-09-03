@@ -41,6 +41,25 @@ changes the specified behavior.
    geometry, spacing, variants, and palette reference values require approved
    source assets.
 
+## Acceptance-harness implementation details
+
+The harness architecture and initial scenario catalog are settled in
+[Executable acceptance harness design](acceptance-harness-design.md). Later
+implementation must select:
+
+8. **Cross-platform worker process control.** Choose deterministic crash/barrier
+   primitives that work for Linux CI, macOS development, and Docker.
+9. **Fake-target implementation dependency.** Choose the minimal Python HTTP
+   library and packaging command for the already-decided reusable service
+   contract.
+10. **Playwright browser matrix.** Decide the smallest supported matrix beyond
+    the initial Chromium path, based on actual deployment needs.
+11. **Docker smoke orchestration.** Decide whether Compose is invoked directly
+    or coordinated through pytest while keeping independently reproducible
+    steps.
+12. **Structured acceptance output.** Choose the compact machine-readable
+    format accompanying pytest/JUnit and its future CI artifact-retention rule.
+
 These questions do not reopen settled decisions such as PostgreSQL-only
 persistence, Docker for v1, API-only evaluation, two roles, human authority,
 or immutable historical observations.

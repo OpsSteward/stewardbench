@@ -317,8 +317,8 @@ This selection does not decide:
 - a future REST toolkit, comprehensive API, user-facing CLI, or MCP design;
 - Kubernetes, CI integration, release gating, scheduled runs, or multi-target
   fan-out; or
-- repository-specific skills and the independent executable acceptance
-  harness.
+- implementation details for the independently designed executable acceptance
+  harness in [Executable acceptance harness design](acceptance-harness-design.md).
 
 ## Primary technical evidence
 

@@ -3,6 +3,9 @@
 Status: Authoritative logical architecture for StewardBench v1. The technology
 realization is selected in [Framework selection](framework-selection.md) and
 [ADR 0007](adr/0007-django-monolith-and-postgresql-worker.md).
+The independent evidence architecture is selected in
+[ADR 0008](adr/0008-layered-executable-acceptance-harness.md) and detailed in
+[Executable acceptance harness design](acceptance-harness-design.md).
 
 ## Architectural goals
 
@@ -498,6 +501,23 @@ Failure ownership must remain visible:
 
 This separation prevents StewardBench defects from being attributed to the
 evaluated product.
+
+## Acceptance boundary
+
+StewardBench's own executable acceptance is layered rather than one opaque
+end-to-end suite. Domain/service and Django request tests prove deterministic
+semantics and server-side RBAC; real PostgreSQL proves persistence, migration,
+locking, claim, lease, and concurrency behavior; a reusable deterministic fake
+target independently observes remote submissions; selective Playwright proves
+high-value browser behavior; and Docker smoke proves the deployable
+web/worker/PostgreSQL topology.
+
+Routine acceptance does not require live OpsSteward or live LLM services.
+Optional live-target and real-model calibration checks are separately
+configured and reported. Harness, fixture, database, worker, adapter,
+evaluated-target, evaluator/judge, comparator, and environment failures remain
+distinguishable from StewardBench product failures. See
+[Executable acceptance harness design](acceptance-harness-design.md).
 
 ## Extensibility points—not v1 commitments
 

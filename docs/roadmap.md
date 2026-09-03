@@ -57,6 +57,14 @@ server-rendered/HTMX UI, Django ORM/migrations, and PostgreSQL-backed worker in
 [Framework selection](framework-selection.md). This selection changes no
 release boundary in this roadmap.
 
+The future executable test architecture is defined in
+[Executable acceptance harness design](acceptance-harness-design.md). Its
+layered scenario catalog should grow alongside v1 product milestones: fast
+domain checks first, then PostgreSQL/worker/adapter acceptance, request/RBAC and
+comparison acceptance, selective browser flows, and Docker smoke. Designing or
+running this repository's own software tests does not move CI-triggered
+evaluated-product execution into v1.
+
 Run cancellation is unresolved and is listed in
 [Open questions](open-questions.md). Pause/resume is not in v1.
 
