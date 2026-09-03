@@ -145,6 +145,10 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 
 WORKER_POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "10"))
 WORKER_MAX_CONCURRENCY = positive_int_env("WORKER_MAX_CONCURRENCY", 8, maximum=64)
+# M9 provider calls are a distinct resource from evaluated-target capacity.
+# They intentionally have their own bounded worker pool and never consume an
+# OpsSteward TargetRevision concurrency slot.
+EVALUATOR_WORKER_MAX_CONCURRENCY = positive_int_env("EVALUATOR_WORKER_MAX_CONCURRENCY", 4, maximum=64)
 WORKER_LEASE_SECONDS = positive_int_env("WORKER_LEASE_SECONDS", 30, maximum=86400)
 WORKER_HEARTBEAT_SECONDS = positive_int_env("WORKER_HEARTBEAT_SECONDS", 10, maximum=3600)
 if WORKER_HEARTBEAT_SECONDS >= WORKER_LEASE_SECONDS:

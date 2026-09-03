@@ -480,6 +480,19 @@ Use a uniquely named disposable Compose project for concurrent acceptance
 work. Do not publish fake-target control ports outside that isolated test
 network.
 
+For repeatable validation, prefer the wrapper below. It preserves a usable
+user-provided Docker configuration, otherwise falls back to the established
+rootless socket, verifies server connectivity, and reports the selected daemon:
+
+```bash
+./scripts/with-rootless-docker.sh docker version
+./scripts/with-rootless-docker.sh docker compose up -d db
+```
+
+Set `STEWARD_ROOTLESS_DOCKER_SOCKET` only when the established rootless socket
+is intentionally different. The wrapper does not start daemons, change host
+permissions, or require `sudo`.
+
 ## Static assets and logs
 
 The image collects the build-free local stylesheet and WhiteNoise serves it.

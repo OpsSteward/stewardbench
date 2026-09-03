@@ -718,11 +718,22 @@ class ExecutionValidityDecision(models.Model):
 
 
 class AutomatedEvaluationResult(models.Model):
-    """M5 storage envelope only; evaluator invocation belongs to M9."""
+    """Immutable M9 deterministic/policy evaluator evidence.
+
+    The append-only ``supersedes`` chain describes a newer requested
+    evaluation for the same evaluator identity.  Result data never mutates an
+    Execution observation or its review/comparison projections.
+    """
 
     class Status(models.TextChoices):
         COMPLETE = "COMPLETE", "Complete"
+        NOT_APPLICABLE = "NOT_APPLICABLE", "Not applicable"
         ERROR = "ERROR", "Error"
+
+    class Mechanism(models.TextChoices):
+        DETERMINISTIC = "DETERMINISTIC", "Deterministic"
+        POLICY = "POLICY", "Policy"
+        EXPECTED_CANNOT_CONCLUDE = "EXPECTED_CANNOT_CONCLUDE", "Expected cannot conclude"
 
     class Outcome(models.TextChoices):
         PASS = "PASS", "Pass"
@@ -736,10 +747,31 @@ class AutomatedEvaluationResult(models.Model):
     )
     evaluator_key = models.CharField(max_length=100)
     evaluator_version = models.CharField(max_length=80)
-    status = models.CharField(max_length=12, choices=Status.choices)
+    mechanism = models.CharField(max_length=32, choices=Mechanism.choices, default=Mechanism.DETERMINISTIC)
+    configuration_version = models.CharField(max_length=80, default="legacy-m5")
+    status = models.CharField(max_length=16, choices=Status.choices)
     outcome = models.CharField(max_length=20, choices=Outcome.choices, blank=True)
     details = models.JSONField(default=dict, blank=True)
+    input_fingerprint = models.CharField(max_length=64, blank=True)
+    input_manifest = models.JSONField(default=dict, blank=True)
+    raw_result = models.JSONField(default=dict, blank=True)
+    error_class = models.CharField(max_length=100, blank=True)
     error_detail = models.TextField(blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    invocation = models.ForeignKey(
+        "EvaluationInvocation",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="automated_results",
+    )
+    supersedes = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="superseded_by",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -755,7 +787,7 @@ class AutomatedEvaluationResult(models.Model):
 
 
 class LLMJudgeResult(models.Model):
-    """M5 storage envelope only; judge invocation belongs to M9."""
+    """Immutable M9 advisory judge evidence for one stored Execution."""
 
     class Status(models.TextChoices):
         COMPLETE = "COMPLETE", "Complete"
@@ -769,11 +801,35 @@ class LLMJudgeResult(models.Model):
     provider = models.CharField(max_length=100)
     model_identifier = models.CharField(max_length=160)
     judge_version = models.CharField(max_length=80)
+    rubric_id = models.CharField(max_length=100, default="legacy-unknown")
+    rubric_version = models.CharField(max_length=80, default="legacy-m5")
     prompt_version = models.CharField(max_length=80)
     status = models.CharField(max_length=12, choices=Status.choices)
     dimensions = models.JSONField(default=dict, blank=True)
+    rationale = models.TextField(blank=True)
+    advisory_disposition = models.CharField(max_length=80, blank=True)
     details = models.JSONField(default=dict, blank=True)
+    input_fingerprint = models.CharField(max_length=64, blank=True)
+    input_manifest = models.JSONField(default=dict, blank=True)
+    raw_result = models.JSONField(default=dict, blank=True)
+    provider_metadata = models.JSONField(default=dict, blank=True)
+    error_class = models.CharField(max_length=100, blank=True)
     error_detail = models.TextField(blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    invocation = models.ForeignKey(
+        "EvaluationInvocation",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="judge_results",
+    )
+    supersedes = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="superseded_by",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -786,6 +842,93 @@ class LLMJudgeResult(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("LLM judge results are immutable and cannot be deleted.")
+
+
+class EvaluationInvocation(models.Model):
+    """Durable M9 work item for analysis of an already stored observation.
+
+    This is intentionally independent from the product ``Execution`` work
+    lifecycle.  It holds no target request, credentials, answer copy, or target
+    concurrency state.  The worker may safely process it after a browser POST
+    has returned.
+    """
+
+    class Kind(models.TextChoices):
+        EVALUATOR = "EVALUATOR", "Evaluator"
+        JUDGE = "JUDGE", "LLM judge"
+
+    class State(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        RUNNING = "RUNNING", "Running"
+        COMPLETED = "COMPLETED", "Completed"
+        FAILED = "FAILED", "Failed"
+
+    execution = models.ForeignKey(Execution, on_delete=models.PROTECT, related_name="evaluation_invocations")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    state = models.CharField(max_length=12, choices=State.choices, default=State.PENDING)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="requested_evaluation_invocations",
+    )
+    evaluator_key = models.CharField(max_length=100)
+    evaluator_version = models.CharField(max_length=80)
+    mechanism = models.CharField(max_length=32, blank=True)
+    provider = models.CharField(max_length=100, blank=True)
+    model_identifier = models.CharField(max_length=160, blank=True)
+    judge_version = models.CharField(max_length=80, blank=True)
+    rubric_id = models.CharField(max_length=100, blank=True)
+    rubric_version = models.CharField(max_length=80, blank=True)
+    prompt_version = models.CharField(max_length=80, blank=True)
+    configuration = models.JSONField(default=dict, blank=True)
+    input_fingerprint = models.CharField(max_length=64, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    worker_id = models.CharField(max_length=200, blank=True)
+    claim_token = models.UUIDField(null=True, blank=True, editable=False)
+    claim_attempt = models.PositiveIntegerField(default=0)
+    claim_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    claim_lease_expires_at = models.DateTimeField(null=True, blank=True)
+    result_error_class = models.CharField(max_length=100, blank=True)
+    result_error_detail = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("id",)
+        indexes = [
+            models.Index(fields=("state", "kind", "id"), name="eval_invocation_claim_idx"),
+            models.Index(fields=("execution", "kind", "id"), name="eval_invocation_current_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(kind__in=("EVALUATOR", "JUDGE")),
+                name="evaluations_invocation_kind",
+            ),
+            models.CheckConstraint(
+                condition=Q(state__in=("PENDING", "RUNNING", "COMPLETED", "FAILED")),
+                name="evaluations_invocation_state",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        state="PENDING",
+                        worker_id="",
+                        claim_token__isnull=True,
+                        claim_heartbeat_at__isnull=True,
+                        claim_lease_expires_at__isnull=True,
+                    )
+                    | Q(
+                        state="RUNNING",
+                        claim_token__isnull=False,
+                        claim_heartbeat_at__isnull=False,
+                        claim_lease_expires_at__isnull=False,
+                    )
+                    & ~Q(worker_id="")
+                    | Q(state__in=("COMPLETED", "FAILED"))
+                ),
+                name="evaluations_invocation_claim_state",
+            ),
+        ]
 
 
 class Baseline(models.Model):

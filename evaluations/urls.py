@@ -33,6 +33,16 @@ urlpatterns = [
     path("runs/<uuid:run_id>/rerun/", views.rerun_source_run_view, name="run-rerun"),
     path("runs/<uuid:run_id>/baselines/", views.create_baseline_view, name="baseline-create"),
     path("executions/<int:execution_id>/", views.execution_detail, name="execution-detail"),
+    path(
+        "executions/<int:execution_id>/judge-reevaluate/",
+        views.judge_reevaluate_view,
+        name="judge-reevaluate",
+    ),
+    path(
+        "executions/<int:execution_id>/evaluator-reevaluate/",
+        views.evaluator_reevaluate_view,
+        name="evaluator-reevaluate",
+    ),
     path("executions/<int:execution_id>/review/", views.record_human_review_view, name="execution-review"),
     path("executions/<int:execution_id>/review-state/", views.review_state_view, name="execution-review-state"),
     path("executions/<int:execution_id>/comments/", views.execution_comment_view, name="execution-comment"),

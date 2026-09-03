@@ -278,6 +278,17 @@ Retain original judged answer/evidence references, model/provider identity,
 judge version, prompt/version, raw structured output where safe, parsed
 dimensions, timestamps, and errors. Never overwrite a prior judge result.
 
+M9's provider-neutral structured schema records each approved dimension as a
+qualitative `result` plus concise rationale, rather than an unapproved numeric
+score or aggregate. The initial repository-controlled calibration fixture is
+`tests/fixtures/judge_calibration_v1.json`; it is structural calibration
+evidence, not a universal answer oracle or prompt-training corpus.
+
+For a selected evaluator identity (or the selected judge), the current
+projection is the persisted result for the highest durable re-evaluation request
+sequence, not simply whichever asynchronous call finishes last. A late older
+request remains immutable history and cannot displace a completed newer result.
+
 If the judge and a human disagree, the human GOOD/BAD is accepted and the judge
 result remains visible. This disagreement is calibration evidence. Judge
 unavailability or malformed output is evaluator ERROR, not product BAD.

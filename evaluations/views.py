@@ -29,7 +29,9 @@ from .models import (
     ComparisonItem,
     ConversationAttempt,
     EvaluationRun,
+    EvaluationInvocation,
     Execution,
+    LLMJudgeResult,
     SemanticComparisonResult,
 )
 from .services import (
@@ -38,11 +40,15 @@ from .services import (
     baseline_completeness,
     comparison_human_transition,
     comparison_summary,
+    current_automated_results,
+    current_judge_result,
+    enqueue_evaluator_invocation,
     create_baseline,
     eligible_question_count,
     launch_controlled_comparison,
     launch_conversation_scenario,
     launch_run,
+    judge_disagrees_with_human,
     mark_review_required,
     mark_reviewed_without_judgment,
     record_human_review,
@@ -210,11 +216,13 @@ def execution_detail(request, execution_id):
             "review_tracking_events__actor",
             "validity_history__decided_by",
             "automated_results",
-            "llm_judge_results",
+            Prefetch("llm_judge_results", queryset=LLMJudgeResult.objects.select_related("invocation", "supersedes")),
+            "evaluation_invocations",
             "retried_executions__run",
         ),
         pk=execution_id,
     )
+
     queue_scope, queue_ids = _review_queue(execution.run, request)
     try:
         queue_position = queue_ids.index(execution.pk)
@@ -266,6 +274,8 @@ def execution_detail(request, execution_id):
     )
     semantic_history = list(comparison_item.semantic_results.all()) if comparison_item else []
     current_semantic_result = _current_semantic_result_from_history(semantic_history)
+    judge_history = list(execution.llm_judge_results.all())
+    current_judge = current_judge_result(execution)
     return render(
         request,
         "evaluations/execution_detail.html",
@@ -288,6 +298,12 @@ def execution_detail(request, execution_id):
             "comparison_transition": comparison_human_transition(comparison_item) if comparison_item else None,
             "semantic_history": semantic_history,
             "current_semantic_result": current_semantic_result,
+            "current_automated_results": current_automated_results(execution),
+            "automated_history": list(execution.automated_results.all()),
+            "judge_history": judge_history,
+            "current_judge_result": current_judge,
+            "judge_disagreement": judge_disagrees_with_human(execution, current_judge),
+            "evaluation_invocations": list(execution.evaluation_invocations.all()),
             "conversation_transcript": (
                 execution.run.executions.select_related("conversation_turn", "current_human_review")
                 .filter(conversation_attempt=execution.conversation_attempt)
@@ -297,6 +313,58 @@ def execution_detail(request, execution_id):
             ),
         },
     )
+
+
+@login_required
+def judge_reevaluate_view(request, execution_id):
+    """ADMIN-only M9 re-evaluation request for a stored answer.
+
+    This POST creates evaluator work only.  It does not launch a Run, retry an
+    Execution, or make an evaluated-product request.
+    """
+
+    if request.method != "POST":
+        raise PermissionDenied("A POST is required to re-evaluate a stored answer.")
+    _require_admin(request)
+    execution = get_object_or_404(Execution, pk=execution_id)
+    try:
+        invocation = enqueue_evaluator_invocation(
+            actor=request.user,
+            execution=execution,
+            kind=EvaluationInvocation.Kind.JUDGE,
+        )
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"Queued LLM judge evaluation {invocation.pk} for the stored answer; no target request was created.",
+        )
+    return redirect("execution-detail", execution_id=execution.pk)
+
+
+@login_required
+def evaluator_reevaluate_view(request, execution_id):
+    """ADMIN-only request to rerun the selected deterministic evaluator later."""
+
+    if request.method != "POST":
+        raise PermissionDenied("A POST is required to re-evaluate a stored answer.")
+    _require_admin(request)
+    execution = get_object_or_404(Execution, pk=execution_id)
+    try:
+        invocation = enqueue_evaluator_invocation(
+            actor=request.user,
+            execution=execution,
+            kind=EvaluationInvocation.Kind.EVALUATOR,
+        )
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"Queued evaluator evaluation {invocation.pk} for the stored answer; no target request was created.",
+        )
+    return redirect("execution-detail", execution_id=execution.pk)
 
 
 @login_required

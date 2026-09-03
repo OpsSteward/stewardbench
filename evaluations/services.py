@@ -38,10 +38,13 @@ from .models import (
     Comparison,
     ComparisonItem,
     ConversationAttempt,
+    AutomatedEvaluationResult,
+    EvaluationInvocation,
     EvaluationRun,
     Execution,
     ExecutionValidityDecision,
     HumanReview,
+    LLMJudgeResult,
     ResolvedBinding,
     ReviewTracking,
     SemanticComparisonResult,
@@ -55,6 +58,19 @@ from .semantic import (
     SemanticComparatorResponse,
     default_semantic_comparator,
 )
+from .evaluators import (
+    JUDGE_DIMENSIONS,
+    Evaluator,
+    EvaluatorFailure,
+    EvaluatorInput,
+    EvaluatorProtocolError,
+    EvaluatorResponse,
+    LLMJudge,
+    JudgeInput,
+    JudgeResponse,
+    default_evaluator,
+    default_llm_judge,
+)
 
 
 logger = logging.getLogger("stewardbench.worker")
@@ -64,6 +80,13 @@ _IN_PROCESS_WORKER_ID = f"in-process-{uuid.uuid4()}"
 @dataclass(frozen=True)
 class ExecutionClaim:
     execution_id: int
+    worker_id: str
+    token: uuid.UUID
+
+
+@dataclass(frozen=True)
+class EvaluationInvocationClaim:
+    invocation_id: int
     worker_id: str
     token: uuid.UUID
 
@@ -980,6 +1003,628 @@ def _safe_semantic_json(value, *, redact_values: tuple[str, ...] = ()):
             else value
         )
     return _safe_semantic_text(value, limit=1000, redact_values=redact_values)
+
+
+# M9 intentionally reuses the same safe-output posture as semantic triage.
+# Stored answers/evidence are an observation, not a provider prompt instruction,
+# and must not be duplicated verbatim in evaluator diagnostics.
+def _safe_evaluation_text(value, *, limit=2000, redact_values: tuple[str, ...] = ()) -> str:
+    return _safe_semantic_text(value, limit=limit, redact_values=redact_values)
+
+
+def _safe_evaluation_json(value, *, redact_values: tuple[str, ...] = ()):
+    return _safe_semantic_json(value, redact_values=redact_values)
+
+
+def _bounded_evaluation_context(value, *, limit=4000):
+    """Provide only stored, non-secret evidence needed by an evaluator rubric."""
+
+    if isinstance(value, dict):
+        return {
+            _safe_evaluation_text(key, limit=120): _bounded_evaluation_context(item, limit=limit)
+            for key, item in list(value.items())[:40]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_bounded_evaluation_context(item, limit=limit) for item in list(value)[:40]]
+    if isinstance(value, str):
+        return _safe_evaluation_text(value, limit=limit)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return _safe_evaluation_text(value, limit=limit)
+
+
+def _untrusted_context_text_values(value) -> tuple[str, ...]:
+    """Collect bounded textual inputs so provider echoes do not become copies."""
+
+    values: list[str] = []
+
+    def visit(item):
+        if len(values) >= 80:
+            return
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                visit(key)
+                visit(nested)
+        elif isinstance(item, (list, tuple)):
+            for nested in item:
+                visit(nested)
+        elif isinstance(item, str) and item:
+            values.append(item)
+
+    visit(value)
+    return tuple(values)
+
+
+def _evaluation_bindings(execution: Execution) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (binding.name, binding.display_value)
+        for binding in execution.resolved_bindings.order_by("name")
+    )
+
+
+def _stored_answer(execution: Execution) -> str:
+    return execution.display_answer or execution.raw_answer
+
+
+def _evaluator_input(execution: Execution, configuration: dict | None = None) -> EvaluatorInput:
+    version = execution.question_version
+    return EvaluatorInput(
+        execution_id=execution.pk,
+        question_version_id=execution.question_version_id,
+        question=execution.submitted_question,
+        frozen_bindings=_evaluation_bindings(execution),
+        product_answer=_stored_answer(execution),
+        evidence=_bounded_evaluation_context(execution.evidence),
+        evaluation_guidance=version.evaluation_guidance if version else "",
+        configuration=dict(configuration or {}),
+    )
+
+
+def _judge_input(execution: Execution, implementation: LLMJudge, configuration: dict | None = None) -> JudgeInput:
+    version = execution.question_version
+    return JudgeInput(
+        execution_id=execution.pk,
+        question_version_id=execution.question_version_id,
+        question=execution.submitted_question,
+        frozen_bindings=_evaluation_bindings(execution),
+        product_answer=_stored_answer(execution),
+        evidence=_bounded_evaluation_context(execution.evidence),
+        evaluation_guidance=version.evaluation_guidance if version else "",
+        rubric_id=implementation.rubric_id,
+        rubric_version=implementation.rubric_version,
+        configuration=dict(configuration or {}),
+    )
+
+
+def _evaluation_input_manifest(execution: Execution, *, configuration: dict, kind: str) -> tuple[dict, str]:
+    """Persist references/hashes only, never a second copy of answer/evidence."""
+
+    evidence_text = json.dumps(_bounded_evaluation_context(execution.evidence), ensure_ascii=False, sort_keys=True)
+    bindings = _evaluation_bindings(execution)
+    manifest = {
+        "execution_id": execution.pk,
+        "question_version_id": execution.question_version_id,
+        "question_hash": _exact_hash(execution.submitted_question),
+        "bindings_hash": _exact_hash(json.dumps(bindings, ensure_ascii=False, separators=(",", ":"))),
+        "answer_hash": _exact_hash(_stored_answer(execution)),
+        "evidence_hash": _exact_hash(evidence_text),
+        "guidance_hash": _exact_hash(execution.question_version.evaluation_guidance if execution.question_version else ""),
+        "configuration_hash": _exact_hash(json.dumps(configuration, ensure_ascii=False, sort_keys=True)),
+        "kind": kind,
+    }
+    return manifest, _exact_hash(json.dumps(manifest, sort_keys=True, separators=(",", ":")))
+
+
+def _result_invocation_id(result) -> int:
+    # M5 evidence predates invocation rows.  It remains visible as history but
+    # never outranks an M9 result with a durable request sequence.
+    return result.invocation_id or 0
+
+
+def current_judge_result(execution: Execution) -> LLMJudgeResult | None:
+    """Current judge projection: highest completed durable request sequence.
+
+    Completion order cannot make a stale Judge v1 current after a requested
+    Judge v2 result has completed.  Old M5 envelope rows have no invocation
+    and sort behind M9 results while still remaining inspectable.
+    """
+
+    history = list(execution.llm_judge_results.all())
+    return max(history, key=lambda result: (_result_invocation_id(result), result.created_at, result.pk), default=None)
+
+
+def current_automated_results(execution: Execution) -> list[AutomatedEvaluationResult]:
+    """One current independent projection per evaluator key, plus history elsewhere."""
+
+    selected: dict[str, AutomatedEvaluationResult] = {}
+    for result in execution.automated_results.all():
+        existing = selected.get(result.evaluator_key)
+        if existing is None or (_result_invocation_id(result), result.created_at, result.pk) > (
+            _result_invocation_id(existing), existing.created_at, existing.pk
+        ):
+            selected[result.evaluator_key] = result
+    return sorted(selected.values(), key=lambda result: result.evaluator_key)
+
+
+def judge_disagrees_with_human(execution: Execution, result: LLMJudgeResult | None = None) -> bool:
+    """A transparent calibration indicator, not an automatic quality judgment."""
+
+    result = result or current_judge_result(execution)
+    review = execution.current_human_review
+    if not result or result.status != LLMJudgeResult.Status.COMPLETE or not review:
+        return False
+    disposition = result.advisory_disposition.strip().upper()
+    positive = {"STRONG", "POSITIVE", "GOOD"}
+    negative = {"WEAK", "NEGATIVE", "POOR", "BAD"}
+    return (review.judgment == HumanReview.Judgment.BAD and disposition in positive) or (
+        review.judgment == HumanReview.Judgment.GOOD and disposition in negative
+    )
+
+
+def _validate_judge_dimensions(dimensions: object) -> dict:
+    if not isinstance(dimensions, dict) or set(dimensions) != set(JUDGE_DIMENSIONS):
+        raise EvaluatorProtocolError("Judge output must contain every approved dimension exactly once.")
+    normalized = {}
+    for name in JUDGE_DIMENSIONS:
+        dimension = dimensions[name]
+        if not isinstance(dimension, dict) or not str(dimension.get("result", "")).strip():
+            raise EvaluatorProtocolError(f"Judge dimension {name!r} must include a qualitative result.")
+        normalized[name] = {
+            "result": _safe_evaluation_text(dimension["result"], limit=80),
+            "rationale": _safe_evaluation_text(dimension.get("rationale", ""), limit=500),
+        }
+    return normalized
+
+
+def _ensure_terminal_evaluation_execution(execution: Execution):
+    if not execution.is_terminal:
+        raise ValidationError("Stored-answer evaluation is available only after an Execution reaches a terminal outcome.")
+
+
+@transaction.atomic
+def enqueue_evaluator_invocation(
+    *,
+    actor,
+    execution: Execution,
+    kind: str,
+    implementation: Evaluator | LLMJudge | None = None,
+    configuration: dict | None = None,
+) -> EvaluationInvocation:
+    """Persist M9 evaluation work and return promptly; never create target work."""
+
+    require_admin(actor)
+    if kind not in EvaluationInvocation.Kind.values:
+        raise ValidationError("The requested evaluation mechanism is not supported.")
+    locked = (
+        # ``question_version`` is nullable for some historical/conversation
+        # observations. PostgreSQL cannot lock the nullable side of that outer
+        # join, and M9 only needs to serialize changes to the stored Execution
+        # itself before appending analysis work.
+        Execution.objects.select_for_update(of=("self",))
+        .select_related("question_version")
+        .prefetch_related("resolved_bindings")
+        .get(pk=execution.pk)
+    )
+    _ensure_terminal_evaluation_execution(locked)
+    configuration = dict(configuration or {})
+    manifest, fingerprint = _evaluation_input_manifest(locked, configuration=configuration, kind=kind)
+    if kind == EvaluationInvocation.Kind.JUDGE:
+        judge = implementation or default_llm_judge()
+        invocation = EvaluationInvocation.objects.create(
+            execution=locked,
+            kind=kind,
+            requested_by=actor,
+            evaluator_key="llm-judge",
+            evaluator_version=judge.judge_version,
+            provider=judge.provider,
+            model_identifier=judge.model_identifier,
+            judge_version=judge.judge_version,
+            rubric_id=judge.rubric_id,
+            rubric_version=judge.rubric_version,
+            prompt_version=judge.rubric_version,
+            configuration=configuration,
+            input_fingerprint=fingerprint,
+        )
+    else:
+        evaluator = implementation or default_evaluator()
+        invocation = EvaluationInvocation.objects.create(
+            execution=locked,
+            kind=kind,
+            requested_by=actor,
+            evaluator_key=evaluator.evaluator_key,
+            evaluator_version=evaluator.evaluator_version,
+            mechanism=evaluator.mechanism,
+            configuration=configuration,
+            input_fingerprint=fingerprint,
+        )
+    # The result keeps the complete manifest; the queue only needs its stable
+    # fingerprint to prove it refers to this stored observation.
+    _ = manifest
+    return invocation
+
+
+@transaction.atomic
+def claim_next_evaluation_invocation(worker_id: str | None = None) -> EvaluationInvocationClaim | None:
+    """Claim evaluator work without touching product-target concurrency state."""
+
+    worker_id = worker_id or _IN_PROCESS_WORKER_ID
+    invocation = (
+        EvaluationInvocation.objects.select_for_update(skip_locked=True)
+        .filter(state=EvaluationInvocation.State.PENDING)
+        .order_by("id")
+        .first()
+    )
+    if invocation is None:
+        return None
+    token = uuid.uuid4()
+    now = _database_now()
+    invocation.state = EvaluationInvocation.State.RUNNING
+    invocation.worker_id = worker_id
+    invocation.claim_token = token
+    invocation.claim_attempt += 1
+    invocation.started_at = now
+    invocation.claim_heartbeat_at = now
+    invocation.claim_lease_expires_at = _lease_expiry(now)
+    invocation.save(
+        update_fields=(
+            "state",
+            "worker_id",
+            "claim_token",
+            "claim_attempt",
+            "started_at",
+            "claim_heartbeat_at",
+            "claim_lease_expires_at",
+        )
+    )
+    return EvaluationInvocationClaim(invocation.pk, worker_id, token)
+
+
+def refresh_evaluation_invocation_lease(claim: EvaluationInvocationClaim) -> bool:
+    """Heartbeat slow provider work without interacting with target work state."""
+
+    with transaction.atomic():
+        now = _database_now()
+        return (
+            EvaluationInvocation.objects.filter(
+                pk=claim.invocation_id,
+                state=EvaluationInvocation.State.RUNNING,
+                worker_id=claim.worker_id,
+                claim_token=claim.token,
+            ).update(claim_heartbeat_at=now, claim_lease_expires_at=_lease_expiry(now))
+            == 1
+        )
+
+
+class _EvaluationInvocationHeartbeat:
+    def __init__(self, claim: EvaluationInvocationClaim):
+        self.claim = claim
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self._stopped.set()
+        self._thread.join(timeout=settings.WORKER_HEARTBEAT_SECONDS + 1)
+
+    def _run(self):
+        while not self._stopped.wait(settings.WORKER_HEARTBEAT_SECONDS):
+            if not refresh_evaluation_invocation_lease(self.claim):
+                logger.warning("worker evaluator invocation ownership lost invocation_id=%s", self.claim.invocation_id)
+                return
+
+
+@transaction.atomic
+def reconcile_stale_evaluation_invocations() -> int:
+    """Requeue expired M9 analysis work; no product request can be duplicated."""
+
+    now = _database_now()
+    stale = list(
+        EvaluationInvocation.objects.select_for_update(skip_locked=True).filter(
+            state=EvaluationInvocation.State.RUNNING,
+            claim_lease_expires_at__lte=now,
+        )
+    )
+    for invocation in stale:
+        invocation.state = EvaluationInvocation.State.PENDING
+        invocation.worker_id = ""
+        invocation.claim_token = None
+        invocation.claim_heartbeat_at = None
+        invocation.claim_lease_expires_at = None
+        invocation.started_at = None
+        invocation.save(
+            update_fields=(
+                "state",
+                "worker_id",
+                "claim_token",
+                "claim_heartbeat_at",
+                "claim_lease_expires_at",
+                "started_at",
+            )
+        )
+    return len(stale)
+
+
+def _prior_current_judge(execution: Execution) -> LLMJudgeResult | None:
+    return current_judge_result(execution)
+
+
+def _prior_current_evaluator(execution: Execution, evaluator_key: str) -> AutomatedEvaluationResult | None:
+    return next((result for result in current_automated_results(execution) if result.evaluator_key == evaluator_key), None)
+
+
+def _append_evaluator_result(
+    *, invocation: EvaluationInvocation, claim: EvaluationInvocationClaim, implementation: Evaluator
+) -> AutomatedEvaluationResult | None:
+    """Run one evaluator outside a transaction, then append protected result evidence."""
+
+    execution = (
+        Execution.objects.select_related("question_version")
+        .prefetch_related("resolved_bindings")
+        .get(pk=invocation.execution_id)
+    )
+    evaluator_input = _evaluator_input(execution, invocation.configuration)
+    manifest, fingerprint = _evaluation_input_manifest(
+        execution, configuration=invocation.configuration, kind=EvaluationInvocation.Kind.EVALUATOR
+    )
+    started = time.monotonic()
+    input_values = (
+        evaluator_input.question,
+        evaluator_input.product_answer,
+        evaluator_input.evaluation_guidance,
+        *_untrusted_context_text_values(evaluator_input.evidence),
+    )
+    try:
+        response = implementation.evaluate(evaluator_input)
+        if not isinstance(response, EvaluatorResponse):
+            raise EvaluatorProtocolError()
+        if not response.applicable:
+            status, outcome = AutomatedEvaluationResult.Status.NOT_APPLICABLE, ""
+        elif response.outcome not in AutomatedEvaluationResult.Outcome.values:
+            raise EvaluatorProtocolError(f"Unsupported evaluator outcome {response.outcome!r}.")
+        else:
+            status, outcome = AutomatedEvaluationResult.Status.COMPLETE, response.outcome
+        details = _safe_evaluation_json(response.details, redact_values=input_values)
+        raw_result = _safe_evaluation_json(response.raw_result, redact_values=input_values)
+        error_class = error_detail = ""
+    except EvaluatorFailure as error:
+        status, outcome = AutomatedEvaluationResult.Status.ERROR, ""
+        details, raw_result = {}, {}
+        error_class = _safe_evaluation_text(error.error_class, limit=100)
+        error_detail = _safe_evaluation_text(error.detail, redact_values=input_values)
+    except Exception:
+        logger.warning("Evaluator failed unexpectedly for invocation %s", invocation.pk)
+        status, outcome = AutomatedEvaluationResult.Status.ERROR, ""
+        details, raw_result = {}, {}
+        error_class = "EVALUATOR_INTERNAL_ERROR"
+        error_detail = "Evaluator failed unexpectedly; the product observation remains unchanged."
+    elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
+    with transaction.atomic():
+        locked_invocation = EvaluationInvocation.objects.select_for_update().get(pk=invocation.pk)
+        if (
+            locked_invocation.state != EvaluationInvocation.State.RUNNING
+            or locked_invocation.worker_id != claim.worker_id
+            or locked_invocation.claim_token != claim.token
+        ):
+            # A lease recovery assigned this stored-only analysis to a new
+            # worker.  This stale completion may not append duplicate evidence
+            # or displace the newer current projection.
+            return None
+        locked_execution = Execution.objects.select_for_update().get(pk=invocation.execution_id)
+        prior = _prior_current_evaluator(locked_execution, implementation.evaluator_key)
+        supersedes = prior if prior and locked_invocation.pk > _result_invocation_id(prior) else None
+        result = AutomatedEvaluationResult.objects.create(
+            execution=locked_execution,
+            evaluator_key=_safe_evaluation_text(implementation.evaluator_key, limit=100),
+            evaluator_version=_safe_evaluation_text(implementation.evaluator_version, limit=80),
+            mechanism=_safe_evaluation_text(implementation.mechanism, limit=32),
+            configuration_version=_safe_evaluation_text(
+                str(locked_invocation.configuration.get("configuration_version", "m9-v1")), limit=80
+            ),
+            status=status,
+            outcome=outcome,
+            details=details,
+            input_fingerprint=fingerprint,
+            input_manifest=manifest,
+            raw_result=raw_result,
+            error_class=error_class,
+            error_detail=error_detail,
+            latency_ms=elapsed_ms,
+            invocation=locked_invocation,
+            supersedes=supersedes,
+        )
+        locked_invocation.state = EvaluationInvocation.State.COMPLETED
+        locked_invocation.completed_at = _database_now()
+        locked_invocation.claim_heartbeat_at = None
+        locked_invocation.claim_lease_expires_at = None
+        locked_invocation.result_error_class = error_class
+        locked_invocation.result_error_detail = error_detail
+        locked_invocation.save(
+            update_fields=(
+                "state",
+                "completed_at",
+                "claim_heartbeat_at",
+                "claim_lease_expires_at",
+                "result_error_class",
+                "result_error_detail",
+            )
+        )
+    return result
+
+
+def _append_judge_result(
+    *, invocation: EvaluationInvocation, claim: EvaluationInvocationClaim, implementation: LLMJudge
+) -> LLMJudgeResult | None:
+    """Run an advisory judge against stored content and append independent evidence."""
+
+    execution = (
+        Execution.objects.select_related("question_version")
+        .prefetch_related("resolved_bindings")
+        .get(pk=invocation.execution_id)
+    )
+    judge_input = _judge_input(execution, implementation, invocation.configuration)
+    manifest, fingerprint = _evaluation_input_manifest(
+        execution, configuration=invocation.configuration, kind=EvaluationInvocation.Kind.JUDGE
+    )
+    started = time.monotonic()
+    input_values = (
+        judge_input.question,
+        judge_input.product_answer,
+        judge_input.evaluation_guidance,
+        *_untrusted_context_text_values(judge_input.evidence),
+    )
+    try:
+        response = implementation.judge(judge_input)
+        if not isinstance(response, JudgeResponse):
+            raise EvaluatorProtocolError("The judge returned an unsupported structured result.")
+        dimensions = _validate_judge_dimensions(response.dimensions)
+        status = LLMJudgeResult.Status.COMPLETE
+        rationale = _safe_evaluation_text(response.rationale, redact_values=input_values)
+        advisory_disposition = _safe_evaluation_text(response.advisory_disposition, limit=80)
+        details = {"schema": "judge-dimensions-v1"}
+        raw_result = _safe_evaluation_json(response.raw_result, redact_values=input_values)
+        provider_metadata = _safe_evaluation_json(response.provider_metadata, redact_values=input_values)
+        error_class = error_detail = ""
+    except EvaluatorFailure as error:
+        status, dimensions, rationale, advisory_disposition = LLMJudgeResult.Status.ERROR, {}, "", ""
+        details, raw_result, provider_metadata = {}, {}, {}
+        error_class = _safe_evaluation_text(error.error_class, limit=100)
+        error_detail = _safe_evaluation_text(error.detail, redact_values=input_values)
+    except Exception:
+        logger.warning("LLM judge failed unexpectedly for invocation %s", invocation.pk)
+        status, dimensions, rationale, advisory_disposition = LLMJudgeResult.Status.ERROR, {}, "", ""
+        details, raw_result, provider_metadata = {}, {}, {}
+        error_class = "JUDGE_INTERNAL_ERROR"
+        error_detail = "LLM judge failed unexpectedly; the product observation remains unchanged."
+    elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
+    with transaction.atomic():
+        locked_invocation = EvaluationInvocation.objects.select_for_update().get(pk=invocation.pk)
+        if (
+            locked_invocation.state != EvaluationInvocation.State.RUNNING
+            or locked_invocation.worker_id != claim.worker_id
+            or locked_invocation.claim_token != claim.token
+        ):
+            return None
+        locked_execution = Execution.objects.select_for_update().get(pk=invocation.execution_id)
+        prior = _prior_current_judge(locked_execution)
+        supersedes = prior if prior and locked_invocation.pk > _result_invocation_id(prior) else None
+        result = LLMJudgeResult.objects.create(
+            execution=locked_execution,
+            provider=_safe_evaluation_text(implementation.provider, limit=100),
+            model_identifier=_safe_evaluation_text(implementation.model_identifier, limit=160),
+            judge_version=_safe_evaluation_text(implementation.judge_version, limit=80),
+            rubric_id=_safe_evaluation_text(implementation.rubric_id, limit=100),
+            rubric_version=_safe_evaluation_text(implementation.rubric_version, limit=80),
+            prompt_version=_safe_evaluation_text(implementation.rubric_version, limit=80),
+            status=status,
+            dimensions=dimensions,
+            rationale=rationale,
+            advisory_disposition=advisory_disposition,
+            details=details,
+            input_fingerprint=fingerprint,
+            input_manifest=manifest,
+            raw_result=raw_result,
+            provider_metadata=provider_metadata,
+            error_class=error_class,
+            error_detail=error_detail,
+            latency_ms=elapsed_ms,
+            invocation=locked_invocation,
+            supersedes=supersedes,
+        )
+        locked_invocation.state = EvaluationInvocation.State.COMPLETED
+        locked_invocation.completed_at = _database_now()
+        locked_invocation.claim_heartbeat_at = None
+        locked_invocation.claim_lease_expires_at = None
+        locked_invocation.result_error_class = error_class
+        locked_invocation.result_error_detail = error_detail
+        locked_invocation.save(
+            update_fields=(
+                "state",
+                "completed_at",
+                "claim_heartbeat_at",
+                "claim_lease_expires_at",
+                "result_error_class",
+                "result_error_detail",
+            )
+        )
+    return result
+
+
+def process_evaluation_invocation(
+    claim: EvaluationInvocationClaim,
+    *,
+    evaluator: Evaluator | None = None,
+    judge: LLMJudge | None = None,
+):
+    """Process one claimed M9 job; it has no target adapter interaction."""
+
+    invocation = EvaluationInvocation.objects.get(pk=claim.invocation_id)
+    if (
+        invocation.state != EvaluationInvocation.State.RUNNING
+        or invocation.worker_id != claim.worker_id
+        or invocation.claim_token != claim.token
+    ):
+        return None
+    if invocation.kind == EvaluationInvocation.Kind.JUDGE:
+        with _EvaluationInvocationHeartbeat(claim):
+            return _append_judge_result(
+                invocation=invocation,
+                claim=claim,
+                implementation=judge or default_llm_judge(),
+            )
+    with _EvaluationInvocationHeartbeat(claim):
+        return _append_evaluator_result(
+            invocation=invocation,
+            claim=claim,
+            implementation=evaluator or default_evaluator(),
+        )
+
+
+def process_next_evaluation_invocation(
+    worker_id: str | None = None,
+    *,
+    evaluator: Evaluator | None = None,
+    judge: LLMJudge | None = None,
+):
+    claim = claim_next_evaluation_invocation(worker_id)
+    if claim is None:
+        return False
+    process_evaluation_invocation(claim, evaluator=evaluator, judge=judge)
+    return True
+
+
+def reevaluate_stored_answer(
+    *,
+    actor,
+    execution: Execution,
+    evaluator: Evaluator | None = None,
+    judge: LLMJudge | None = None,
+    configuration: dict | None = None,
+):
+    """ADMIN-only immediate service path used by deterministic acceptance.
+
+    It still creates and claims the durable M9 invocation row first.  Tests can
+    inject a deterministic provider while production browser POSTs only enqueue
+    work for the worker, so neither path creates a new Run, Execution, or
+    target request.
+    """
+
+    if (evaluator is None) == (judge is None):
+        raise ValidationError("Select exactly one evaluator or LLM judge implementation.")
+    kind = EvaluationInvocation.Kind.JUDGE if judge is not None else EvaluationInvocation.Kind.EVALUATOR
+    invocation = enqueue_evaluator_invocation(
+        actor=actor,
+        execution=execution,
+        kind=kind,
+        implementation=judge or evaluator,
+        configuration=configuration,
+    )
+    claim = claim_next_evaluation_invocation(_IN_PROCESS_WORKER_ID)
+    if claim is None or claim.invocation_id != invocation.pk:  # pragma: no cover - queue integrity guard
+        raise RuntimeError("The newly created evaluation invocation could not be claimed.")
+    return process_evaluation_invocation(claim, evaluator=evaluator, judge=judge)
 
 
 def _current_semantic_result(item: ComparisonItem) -> SemanticComparisonResult | None:
