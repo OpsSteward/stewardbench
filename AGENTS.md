@@ -143,6 +143,8 @@ application code.
 
 ## Future skills and harness
 
-Repository-specific development/QA skills and an executable StewardBench
-acceptance harness are the next planned governance/quality work. Do not define
-or scaffold them in this file or without a separately authorized task.
+Use the repository-specific
+[StewardBench development skill](skills/stewardbench-development/SKILL.md) for
+implementation work. An independent QA/acceptance skill and executable
+StewardBench acceptance harness remain planned; do not define or scaffold them
+without a separately authorized task.
