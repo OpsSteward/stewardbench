@@ -39,6 +39,7 @@ begun.
 
 - [Agent operating contract](AGENTS.md)
 - [StewardBench development skill](skills/stewardbench-development/SKILL.md)
+- [StewardBench QA/acceptance skill](skills/stewardbench-qa/SKILL.md)
 - [Documentation index](docs/README.md)
 - [Product definition](docs/product-definition.md)
 - [Architecture](docs/architecture.md)
@@ -65,5 +66,7 @@ begun.
 
 See the [roadmap](docs/roadmap.md) for authoritative boundaries. Next is
 product-owner review of the [framework decision](docs/framework-selection.md),
-followed by the independent QA/acceptance skill, acceptance harness, and
-milestone planning—not application implementation yet.
+followed by design of the executable acceptance harness and milestone
+planning—not application implementation yet. The repository-specific
+development and independent QA/acceptance skills are available for those later
+sessions.

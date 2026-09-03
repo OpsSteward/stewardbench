@@ -141,10 +141,12 @@ application code.
 - Do not assume autonomous commit permission; follow the current task and
   repository instructions.
 
-## Future skills and harness
+## Repository skills and future harness
 
 Use the repository-specific
 [StewardBench development skill](skills/stewardbench-development/SKILL.md) for
-implementation work. An independent QA/acceptance skill and executable
-StewardBench acceptance harness remain planned; do not define or scaffold them
-without a separately authorized task.
+implementation work. Use the independent
+[StewardBench QA/acceptance skill](skills/stewardbench-qa/SKILL.md) to prove
+behavior against repository authority. The executable StewardBench acceptance
+harness remains planned; do not define or scaffold it without a separately
+authorized task.
