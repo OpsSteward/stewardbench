@@ -32,6 +32,10 @@ universal ground truth.
 
 ## Status
 
+StewardBench v1.0.0 is feature complete. M11 release acceptance and live
+OpsSteward adapter certification are the remaining release gates; consult the
+release acceptance report before treating a candidate as released.
+
 M0 provides the runnable authenticated foundation. M1 adds the managed,
 product-neutral catalog. M2 adds the approved, non-destructive workbook import,
 immutable source provenance, deterministic draft Questions, and visibly
@@ -137,8 +141,8 @@ and future executable acceptance-harness architectures are now documented.
 The authoritative v1 implementation milestone plan pairs each product increment
 with development tests and independent acceptance evidence. The repository-
 specific development and independent QA/acceptance skills govern implementation
-and acceptance work. M0 through M8 are implemented; M9 and later milestones
-remain separately authorized.
+and acceptance work. M0 through M10 are accepted and v1 is feature complete;
+M11 independently certifies the release candidate.
 
 M10 also records external response latency, target-reported token telemetry when
 available, and runtime/model context independently from human answer quality.

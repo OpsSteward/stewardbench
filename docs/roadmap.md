@@ -4,6 +4,15 @@ This roadmap defines release boundaries, not delivery dates. Capabilities move
 into a release only through explicit product-owner review. Optional work must
 not delay the core v1 workflow.
 
+## Release status
+
+M0–M10 are accepted and StewardBench v1.0.0 is feature complete. M11 is the
+independent release-acceptance gate for the Docker deployment, complete catalog,
+migration history, and credential-bound OpsSteward integration. After M11, the
+intended posture is immediate Docker-based operational use, followed by small
+v1.x fixes and learning; Kubernetes and CI-triggered evaluation remain v2, and
+MCP, a user-facing CLI, and broader intelligence remain v3+.
+
 ## StewardBench v1 — core
 
 The central workflow is:

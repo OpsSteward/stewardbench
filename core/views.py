@@ -1,5 +1,6 @@
 from django.contrib.auth.decorators import login_required
 from django.db import connection
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 
@@ -25,6 +26,7 @@ def operational_status(request):
             "automated": automated_readiness(),
             "worker": worker_readiness(),
             "database_status": "PostgreSQL configured",
+            "application_version": settings.STEWARD_BENCH_APPLICATION_VERSION,
         },
     )
 

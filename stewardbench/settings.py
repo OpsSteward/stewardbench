@@ -157,7 +157,7 @@ if WORKER_HEARTBEAT_SECONDS >= WORKER_LEASE_SECONDS:
 # Deployment may set this non-secret identifier at build time.  It is not
 # inferred from a repository checkout and exports honestly retain "unknown"
 # when deployment did not provide one.
-STEWARD_BENCH_APPLICATION_VERSION = os.environ.get("STEWARD_BENCH_APPLICATION_VERSION", "unknown")
+STEWARD_BENCH_APPLICATION_VERSION = os.environ.get("STEWARD_BENCH_APPLICATION_VERSION", "1.0.0")
 
 LOGGING = {
     "version": 1,

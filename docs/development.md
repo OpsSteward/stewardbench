@@ -1,8 +1,9 @@
 # Development and deployment
 
-This page documents the implemented M0 foundation through M8 ordered
-conversation scenarios. Real OpsSteward wire-contract certification remains a
-separate, later integration milestone.
+This page documents the v1.0.0 Docker deployment and operational workflow.
+Real OpsSteward wire-contract certification is recorded separately for each
+configured target and must never be inferred from deterministic fake-target
+acceptance.
 
 ## Runtime and configuration
 
@@ -17,6 +18,11 @@ Copy `.env.example` to `.env` for Docker development and replace every
 - `POSTGRES_DB`;
 - `POSTGRES_USER`; and
 - `POSTGRES_PASSWORD`.
+
+`STEWARD_BENCH_APPLICATION_VERSION` identifies the deployed application in the
+ADMIN operational-status page and JSON exports. The v1 release value is
+`1.0.0`; Compose supplies that default, while immutable image/build identity
+should also be retained by the deployment platform.
 
 `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, secure-cookie behavior,
 TLS redirect behavior, database connection settings, the host web port, worker
@@ -39,6 +45,33 @@ later claim eligible Executions. It never holds a database transaction across a
 target call. Both application services wait for PostgreSQL health.
 Migrations remain an explicit one-shot operation and never run implicitly in
 web or worker startup.
+
+### DGX production deployment and upgrade
+
+Keep `.env` or equivalent secret injection outside the repository. Set a long
+random `DJANGO_SECRET_KEY`, explicit `POSTGRES_DB`, `POSTGRES_USER`, and
+`POSTGRES_PASSWORD`, `DJANGO_DEBUG=false`, deployment-specific
+`DJANGO_ALLOWED_HOSTS` and `DJANGO_CSRF_TRUSTED_ORIGINS`, secure cookies, and the
+desired `STEWARD_WEB_PORT`. Configure target session values only as
+`STEWARD_BENCH_TARGET_CREDENTIAL_<REFERENCE>` runtime secrets matching symbolic
+TargetRevision references. No default ADMIN password exists.
+
+For a first install, build the pinned checkout, start `db`, explicitly run
+`python manage.py migrate --noinput` through the `web` image, bootstrap the
+first ADMIN with the password environment mechanism below, then start `web` and
+`worker`. Confirm `/health/live/`, authenticated `/health/ready/`, and the ADMIN
+operational-status page before configuring targets.
+
+Before an upgrade, back up the PostgreSQL database and the external deployment
+configuration/secret mechanism. Deploy the new application image, run the
+explicit migration command once, restart web and worker, and verify readiness
+and worker state. PostgreSQL data—not a container filesystem—is authoritative;
+the named volume requires host-level backup/restore planning. Mapping files and
+the workbook are repository-controlled and need no separate mutable backup.
+
+TLS termination, firewalling, and reverse-proxy policy remain deployment
+responsibilities. Production must not run debug mode or example credentials,
+and public registration is not available.
 
 ## Managed catalog
 

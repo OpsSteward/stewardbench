@@ -114,6 +114,7 @@ def test_acc_export_001_json_preserves_history_and_csv_neutralizes_formula(clien
         assert exported.status_code == 200
         payload = json.loads(exported.content)
         assert payload["schema_version"] == "stewardbench-run-export-v1"
+        assert payload["stewardbench"]["application_version"] == "1.0.0"
         assert payload["run"]["id"] == str(run.pk)
         assert payload["executions"][0]["observation"]["raw_answer"] == raw_answer
         assert payload["executions"][0]["review"]["human_history"][0]["judgment"] == "GOOD"
@@ -156,6 +157,7 @@ def test_acc_unsafe_001_and_operational_status_are_honest_and_role_protected(cli
         client.force_login(minimal_domain["admin"])
         status = client.get(reverse("operational-status"))
         assert status.status_code == 200
+        assert b"StewardBench version:</strong> 1.0.0" in status.content
         assert b"TEST_PATH_VERIFIED" in status.content
         assert b"Not configured" in status.content
         assert b"automated semantic comparison unavailable" in status.content

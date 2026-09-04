@@ -5,7 +5,7 @@ following questions still require source-system evidence or product-owner
 choice. None should be silently answered during implementation if it materially
 changes the specified behavior.
 
-## Integration evidence needed
+## Deployment-specific integration evidence
 
 1. **Exact OpsSteward v1 and v2 API contracts.** Confirm health, question
    request/response, authentication, complete-answer behavior, errors, and v2
@@ -30,18 +30,18 @@ changes the specified behavior.
   and formal bindings. Missing reviewer/time/target/build identity and unknown
   token/timing units intentionally remain unknown rather than open M2 blockers.
 
-## Later technology decisions
+## Optional provider configuration (v1) and v1.x learning
 
 3. **Semantic comparator implementation/model/provider.** Select only after
    obtaining representative response pairs and defining an evaluation set for
    dangerous false-equivalence behavior.
 4. **LLM judge implementation/model/provider and initial rubric prompt.** The
    interface and retention requirements are set, but the provider/model are not.
-5. **Final brand source artwork.** The identity is approved, but final vector
+5. **Final brand source artwork (v1.x).** The identity is approved, but final vector
    geometry, spacing, variants, and palette reference values require approved
    source assets.
 
-## Acceptance-harness implementation details
+## v1.x acceptance-harness implementation details
 
 The harness architecture and initial scenario catalog are settled in
 [Executable acceptance harness design](acceptance-harness-design.md). Later
