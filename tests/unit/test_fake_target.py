@@ -4,7 +4,7 @@ from urllib import request
 
 import pytest
 
-from harness.fake_target import FakeTargetServer
+from harness.fake_target import FakeTargetServer, FakeTargetState
 from harness.fake_target import server as fake_server
 
 
@@ -67,3 +67,19 @@ def test_fake_target_cli_requires_explicit_non_loopback_bind_for_isolated_docker
         fake_server.main()
 
     assert observed == {"address": ("0.0.0.0", 18081), "closed": True}
+
+
+def test_fake_target_journal_can_survive_disposable_container_restart(tmp_path):
+    journal_path = tmp_path / "journal.json"
+    state = FakeTargetState(journal_path=str(journal_path))
+    entry = state.accepted(
+        method="POST", path="/question", request_id="durable-request", concrete_question="safe", body=b"{}"
+    )
+    state.response_started(entry)
+    state.completed(entry)
+
+    restarted = FakeTargetState(journal_path=str(journal_path))
+    snapshot = restarted.journal_snapshot()
+    assert len(snapshot["entries"]) == 1
+    assert snapshot["entries"][0]["request_id"] == "durable-request"
+    assert snapshot["entries"][0]["response_completed_at"]

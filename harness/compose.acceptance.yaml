@@ -1,0 +1,37 @@
+services:
+  fake-target:
+    image: stewardbench:local
+    user: "0:0"
+    command:
+      - python
+      - -m
+      - harness.fake_target
+      - --host
+      - 0.0.0.0
+      - --port
+      - "18081"
+      - --control-token
+      - m11-synthetic-control
+      - --journal-file
+      - /journal/journal.json
+    volumes:
+      - fake_target_journal:/journal
+    networks:
+      default:
+        aliases:
+          - fake-target.test
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:18081/health', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  worker:
+    environment:
+      WORKER_POLL_SECONDS: "0.2"
+    depends_on:
+      fake-target:
+        condition: service_healthy
+
+volumes:
+  fake_target_journal:

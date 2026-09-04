@@ -15,6 +15,7 @@ import secrets
 import socket
 import threading
 import time
+from pathlib import Path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,12 +52,18 @@ class FakeTargetState:
     next_session_number: int = 1
     active_requests: int = 0
     observed_max_concurrency: int = 0
+    journal_path: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _before_acceptance_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _after_acceptance_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _before_response_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def __post_init__(self):
+        if self.journal_path and Path(self.journal_path).exists():
+            stored = json.loads(Path(self.journal_path).read_text(encoding="utf-8"))
+            self.journal = stored.get("entries", [])
+            self.conversation_journal = stored.get("conversation_entries", [])
+            self.observed_max_concurrency = stored.get("observed_max_concurrency", 0)
         self._before_acceptance_event.set()
         self._after_acceptance_event.set()
         self._before_response_event.set()
@@ -82,6 +89,25 @@ class FakeTargetState:
             self._set_barrier(self._before_acceptance_event, self.block_before_acceptance)
             self._set_barrier(self._after_acceptance_event, self.block_after_acceptance)
             self._set_barrier(self._before_response_event, self.block_before_response)
+
+    def _persist_journal(self):
+        if not self.journal_path:
+            return
+        path = Path(self.journal_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "entries": self.journal,
+                    "conversation_entries": self.conversation_journal,
+                    "observed_max_concurrency": self.observed_max_concurrency,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
 
     @staticmethod
     def _set_barrier(event, blocked):
@@ -113,6 +139,7 @@ class FakeTargetState:
             self.sessions.clear()
             self.next_session_number = 1
             self.observed_max_concurrency = 0
+            self._persist_journal()
 
     def journal_snapshot(self):
         with self._lock:
@@ -210,20 +237,24 @@ class FakeTargetState:
                 "telemetry": scripted.get("telemetry", self.telemetry),
             }
             self.journal.append(entry)
+            self._persist_journal()
             return entry
 
     def response_started(self, entry):
         with self._lock:
             entry["response_started_at"] = _timestamp()
+            self._persist_journal()
 
     def completed(self, entry):
         with self._lock:
             entry["response_completed_at"] = _timestamp()
             self.active_requests -= 1
+            self._persist_journal()
 
     def disconnected(self, entry):
         with self._lock:
             entry["disconnected_at"] = _timestamp()
+            self._persist_journal()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -507,8 +538,9 @@ def main():
     )
     parser.add_argument("--port", type=int, default=18081)
     parser.add_argument("--control-token", default=None)
+    parser.add_argument("--journal-file", default=None)
     options = parser.parse_args()
-    state = FakeTargetState()
+    state = FakeTargetState(journal_path=options.journal_file)
     if options.control_token:
         state.control_token = options.control_token
     server = ThreadingHTTPServer((options.host, options.port), _Handler)
