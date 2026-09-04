@@ -3,7 +3,7 @@
 Status: Authoritative v1 implementation sequence
 
 This plan translates the accepted product, Django/PostgreSQL architecture,
-development and QA contracts, executable acceptance-harness design, and all 32
+development and QA contracts, executable acceptance-harness design, and all 35
 initial acceptance scenarios into small end-to-end delivery increments. It does
 not authorize implementation by itself and does not change an accepted ADR.
 
@@ -16,7 +16,7 @@ and the [accepted ADRs](adr/README.md). Product behavior comes from the
 and [UI/UX specification](ui-ux.md). Release boundaries and specialized behavior
 come from the [roadmap](roadmap.md), [corpus import specification](question-corpus-import.md),
 and [target adapter contract](target-adapter-contract.md). The selected stack is
-defined by [framework selection](framework-selection.md), and the 32 scenario
+defined by [framework selection](framework-selection.md), and the 35 scenario
 obligations and evidence layers come from the
 [acceptance harness design](acceptance-harness-design.md).
 
@@ -224,7 +224,7 @@ temporal boundaries/current-version rules chosen by the schema, target revision
 immutability, Unicode tags/text, activation validation, credential-reference
 handling, and forbidden direct mutation. No executable target double is needed.
 
-**Primary acceptance scenarios.** None of the 32 catalog scenarios can yet run
+**Primary acceptance scenarios.** None of the 35 catalog scenarios can yet run
 to its complete PASS condition: ACC-QVER-001 requires completed executions.
 M1 nevertheless has mandatory milestone-specific domain, PostgreSQL, request,
 and authorization acceptance for the catalog behavior above. ACC-QVER-001 is
@@ -589,13 +589,13 @@ material fixtures are CHANGED/REQUIRED; every uncertain/error mode is REQUIRED
 and never UNCHANGED; comparator outputs never synthesize GOOD/BAD; prior results
 remain immutable.
 
-For StewardBench to claim production semantic comparison at feature complete,
-a provider/model/configuration must also be explicitly selected, integrated,
-versioned, and calibrated against representative pairs with emphasis on false
-equivalence. Interface and deterministic acceptance may land earlier without
-pretending that selection has occurred. If the provider remains unresolved,
-M7's offline substrate can be recorded as accepted, but M10 feature-complete
-status is BLOCKED unless the product owner changes the v1 requirement.
+For StewardBench to claim that a real production semantic-comparison provider
+is active, a provider/model/configuration must be explicitly selected,
+integrated, versioned, and calibrated against representative pairs with
+emphasis on false equivalence. That claim is distinct from v1 feature
+completeness: the provider-neutral path may remain explicitly unconfigured at
+M10, provided `COMPARATOR_NOT_CONFIGURED` keeps review required and the
+operational UI/export reports the capability honestly.
 
 **Open dependencies.** Semantic comparator provider/model/prompt/configuration
 and calibration set. Material privacy, data-transfer, or retention implications
@@ -723,8 +723,9 @@ analytics warehouse, snapshot subsystem, or materialized score is introduced.
 panels; actionable GOOD/BAD/ERROR/TIMEOUT/REQUIRED/UNCHANGED/CHANGED/
 NON_COMPARABLE/transition counters; exact filtered drill-down; execution/run/
 comparison filters and pagination; attention-first sorting; chronological
-GOOD/BAD/unreviewed and basic latency/run-duration trends; question longitudinal
-version boundaries; and clear Unknown/mode/target/concurrency context.
+GOOD/BAD/unreviewed, latency p50/p90/p95, token medians, run-duration, and
+throughput trends; question longitudinal version boundaries; and clear
+Unknown/mode/target/concurrency context.
 
 Implement filtered CSV and complete Run JSON export because the required data
 is now already retained; preserve Unicode/structured types and exclude secrets.
@@ -758,7 +759,8 @@ query plans/indexes where justified, and actual adapter mapping tests derived
 from approved wire fixtures.
 
 **Primary acceptance scenarios.** ACC-RBAC-001, ACC-IMM-001, ACC-ADAPT-003,
-ACC-UNSAFE-001, ACC-METRIC-001, and ACC-EXPORT-001.
+ACC-UNSAFE-001, ACC-METRIC-001, ACC-EXPORT-001, ACC-PERF-001,
+ACC-PERF-002, and ACC-EFF-001.
 
 **Acceptance evidence.** Complete direct-mutation denial matrix and unchanged
 DB; canonical before/after historical snapshots; persisted/logged/rendered/
@@ -771,17 +773,18 @@ adapter checks.
 scheduled exports, custom scoring, sophisticated analytics, automatic release
 gating, GitHub build reconstruction, external-event correlation, final artwork
 fabrication, comprehensive REST API/CLI, MCP, CI-triggered evaluation, or
-Kubernetes. Rich p50/p90/p95, throughput, and parallel-efficiency analytics are
-v2 roadmap work; M10 exposes correctly captured raw timing and basic contextual
-trends without silently advancing that scope.
+Kubernetes. M10 includes bounded p50/p90/p95, run throughput, and token-median
+projections from immutable evidence; parallel-efficiency attribution, custom
+analytics, and any release gate remain v2/later work.
 
-**Exit criteria.** All six primary scenarios PASS; all earlier feature
+**Exit criteria.** All nine primary scenarios PASS; all earlier feature
 scenarios remain PASS; every actionable count opens exactly its persisted set;
 unsafe content never executes; secrets are absent before and after export;
 metrics name mechanism and denominator; actual supported OpsSteward question
 wire paths are certified or the affected advertised capability is explicitly
-BLOCKED; production semantic comparator is selected/calibrated as required by
-M7; any advertised real judge is calibrated; no major v1 feature remains.
+BLOCKED; an unconfigured semantic comparator or judge is visibly safe and
+never presented as a live provider; any advertised real judge is calibrated;
+no major v1 feature remains.
 
 **Open dependencies.** Exact OpsSteward v1/v2 wire contracts and optional
 metadata route; semantic comparator selection/calibration; optional real judge
@@ -810,7 +813,7 @@ and the supported smoke path.
 project using the application image for web and worker, PostgreSQL durable
 volume, explicit migration step, and fake target. Exercise web navigation away/
 return, web restart, worker restart/reconciliation, composition down/up without
-volume deletion, and clean shutdown. Run the entire applicable 32-scenario
+volume deletion, and clean shutdown. Run the entire applicable 35-scenario
 catalog in its required tiers; optional live/provider layers are reported
 separately and never convert BLOCKED to PASS.
 
@@ -883,7 +886,7 @@ migration states that consequence explicitly.
 
 Every initial catalog scenario has exactly one primary milestone below. A
 scenario may be developed incrementally and rerun later, but its row identifies
-the first milestone whose exit requires the complete scenario to PASS. All 32
+the first milestone whose exit requires the complete scenario to PASS. All 35
 are v1 obligations; none is silently deferred to v2/v3.
 
 | Scenario ID | Short title | Primary milestone | Requirement/invariant | Acceptance layer | Required before milestone exit? |
@@ -918,10 +921,13 @@ are v1 obligations; none is silently deferred to v2/v3.
 | ACC-UNSAFE-001 | Untrusted output does not execute | M10 | Safe rendered evidence with exact raw preservation | Request + Playwright + PostgreSQL | YES |
 | ACC-METRIC-001 | Exact metric sets and drill-down | M10 | Counts/denominators/filters/pages match independently enumerated IDs | Query/request/browser + PostgreSQL | YES |
 | ACC-EXPORT-001 | Complete secret-free exports | M10 | Unicode/raw/state/type round trip without usable credentials | Export/request + PostgreSQL | YES |
+| ACC-PERF-001 | Versioned performance evidence | M10 | Exact latency boundaries, quality independence, timeout separation, and immutable telemetry | Service + PostgreSQL + fake target | YES |
+| ACC-PERF-002 | Controlled latency comparison | M10 | Controlled pair retains raw deltas, regression rule, band transition, and answer independence | Service + PostgreSQL | YES |
+| ACC-EFF-001 | Target-reported efficiency evidence | M10 | Token/runtime metadata, unknown behavior, deltas, export, and malformed-telemetry isolation | Adapter + export + PostgreSQL | YES |
 | ACC-MIG-001 | Representative upgrade preservation | M11 | Clean/upgrade graph, constraints, exact history, no fabricated identity | Migration + PostgreSQL | YES |
 | ACC-DOCKER-001 | Durable deployable composition | M11 | Web/worker/db evaluation survives process and volume lifecycle | Docker + fake target + PostgreSQL | YES |
 
-The matrix has 32 unique scenario IDs and 32 rows. Export is optional in the
+The matrix has 35 unique scenario IDs and 35 rows. Export is optional in the
 product specification only while its cost is unknown; this plan includes it in
 M10 because the retained v1 data makes the documented CSV/JSON forms a bounded
 increment. If implementation evidence shows it is not inexpensive, removing it
@@ -948,7 +954,7 @@ the row.
 | Retry/rerun creates new immutable history | M5 | M5 |
 | Named immutable baselines and visible completeness | M6 | M6 |
 | Controlled comparison and exact equality | M6 | M6 |
-| Conservative semantic comparison | M7 | M10 real provider/calibration gate |
+| Conservative semantic comparison | M7 | M10 safe readiness/status; real provider/calibration optional |
 | Ordered conversation scenario and complete retry | M8 | M10 supported wire path |
 | Independent automated evaluator and judge records when configured | M5 records/M9 invocation | M9; real activation capability-gated |
 | Dashboard, review workstation, comparisons and URL filters | M3/M5/M6 incrementally | M10 |
@@ -982,9 +988,10 @@ No stage adds MCP or queries GitHub to reconstruct deployed identity.
 ### Comparator and judge sequence
 
 Semantic comparison proceeds as normalized exact equality in M6, a comparator
-interface and deterministic double in M7, then explicit provider/model selection,
-integration, and calibration before a production semantic claim. The exact path
-is usable even while provider selection is open.
+interface and deterministic double in M7, then optional explicit provider/model
+selection, integration, and calibration before a production semantic claim. The
+exact path is usable while provider selection is open; `NOT_CONFIGURED` must
+remain a visible review-required state rather than a fake production result.
 
 Judge work proceeds as immutable result envelopes in M5, interface/schema and
 deterministic fake invocation in M9, then optional real provider/model/prompt
@@ -1069,10 +1076,11 @@ the exact two-role boundary, and their mapped acceptance evidence.
 
 **Feature complete** occurs only when M10 exits: all major documented v1
 capabilities exist, all M0–M10 primary acceptance scenarios pass, required
-OpsSteward question integration and production semantic comparison are
-certified, any advertised conversation/judge capability is honestly supported,
-and remaining work is limited to defects, UX polish, documentation, migration/
-deployment hardening, and catalog-wide acceptance closure.
+OpsSteward question integration is certified or explicitly BLOCKED, optional
+semantic-comparator and judge providers are honestly represented as configured
+or not configured, any advertised conversation capability is honestly
+supported, and remaining work is limited to defects, UX polish, documentation,
+migration/deployment hardening, and catalog-wide acceptance closure.
 
 **Release accepted** occurs only when M11 exits. It additionally requires clean
 and representative upgrade acceptance, durable Docker smoke, complete applicable

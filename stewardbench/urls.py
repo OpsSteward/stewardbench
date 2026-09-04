@@ -15,6 +15,7 @@ urlpatterns = [
     ),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("", core_views.dashboard, name="dashboard"),
+    path("status/", core_views.operational_status, name="operational-status"),
     path("health/live/", core_views.liveness, name="health-live"),
     path("health/ready/", core_views.readiness, name="health-ready"),
     path("users/", include("accounts.urls")),

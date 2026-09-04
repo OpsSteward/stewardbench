@@ -70,11 +70,18 @@ tbody tr:last-child td { border-bottom: 0; }
 .badge { display: inline-block; padding: 2px 7px; border-radius: 999px; background: #e8eff6; color: #23425e; font-size: 12px; font-weight: 700; }
 .badge.active { background: #e4f3e8; color: #23633a; }
 .badge.retired { background: #f0e7e7; color: #733333; }
+.badge.bad-badge { background: #f7e3e3; color: #8a2424; }
 .muted { color: var(--muted); }
 .pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 .filters { display: grid; grid-template-columns: 2fr repeat(3, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; margin-bottom: 18px; }
 .filters label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .filters input, .filters select { width: 100%; padding: 8px; border: 1px solid #aebbc7; border-radius: 4px; font: inherit; }
+.wide-filters { grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
+.compact-filters { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.run-export-actions { justify-content: end; margin: -10px 0 18px; }
+.trend-chart { display: block; width: 100%; min-height: 170px; border: 1px solid var(--border); border-radius: 5px; background: #fbfdff; }
+.dashboard-counters dd { font-size: 25px; }
+.dashboard-counters small { color: var(--muted); display: block; margin-top: 5px; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; }
 .message { padding: 10px 12px; border-left: 4px solid var(--blue); background: white; }
 .login-panel { max-width: 430px; margin: 10vh auto; padding: 28px; border: 1px solid var(--border); border-radius: 7px; background: white; }

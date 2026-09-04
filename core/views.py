@@ -3,10 +3,30 @@ from django.db import connection
 from django.http import JsonResponse
 from django.shortcuts import render
 
+from accounts.policy import require_admin
+from evaluations.reporting import automated_readiness, dashboard_projection, target_adapter_statuses, worker_readiness
+
 
 @login_required
 def dashboard(request):
-    return render(request, "core/dashboard.html")
+    return render(request, "core/dashboard.html", dashboard_projection())
+
+
+@login_required
+def operational_status(request):
+    """Small ADMIN-only readiness view; it is intentionally not a monitor."""
+
+    require_admin(request.user)
+    return render(
+        request,
+        "core/operational_status.html",
+        {
+            "adapter_rows": target_adapter_statuses(),
+            "automated": automated_readiness(),
+            "worker": worker_readiness(),
+            "database_status": "PostgreSQL configured",
+        },
+    )
 
 
 @login_required

@@ -63,3 +63,11 @@ implementation must select:
 These questions do not reopen settled decisions such as PostgreSQL-only
 persistence, Docker for v1, API-only evaluation, two roles, human authority,
 or immutable historical observations.
+
+## Resolved for M10: performance evidence
+
+The initial global policy is `opss-performance-v1`: TARGET ≤1000 ms, GOOD
+≤2000 ms, ACCEPTABLE ≤5000 ms, SLOW ≤10000 ms, BAD >10000 ms. Future threshold
+changes require a new policy version, never edits to v1 semantics. Token usage
+is captured only when target-reported; per-domain efficiency thresholds and
+estimated-token support remain future questions.

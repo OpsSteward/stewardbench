@@ -47,7 +47,8 @@ deterministic acceptance comparator; the real provider/model remains an
 explicit open decision. M8 adds versioned ordered conversation scenarios, a
 durable shared target-session attempt, per-turn transcript/review/comparison
 evidence, and full retries from Turn 1. Real OpsSteward wire-contract
-certification remains a later milestone.
+certification is an M10 operational-integration responsibility and remains
+explicitly unclaimed until approved wire evidence and credentials are available.
 
 ## Run with Docker
 
@@ -138,3 +139,8 @@ with development tests and independent acceptance evidence. The repository-
 specific development and independent QA/acceptance skills govern implementation
 and acceptance work. M0 through M8 are implemented; M9 and later milestones
 remain separately authorized.
+
+M10 also records external response latency, target-reported token telemetry when
+available, and runtime/model context independently from human answer quality.
+This supports controlled build comparisons during OpsSteward routing/model
+optimization without creating a composite score or automatic release gate.

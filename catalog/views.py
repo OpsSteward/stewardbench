@@ -7,6 +7,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from accounts.policy import require_admin
+from evaluations.models import Execution
+from evaluations.reporting import latency_statistics, prepare_runtime_telemetry_for_display, question_trend_rows
 
 from .forms import (
     BindingDefinitionFormSet,
@@ -340,6 +342,8 @@ def target_list(request):
     targets = EvaluationTarget.objects.select_related("product", "environment").prefetch_related(
         "revisions"
     )
+    if request.GET.get("active") == "1":
+        targets = targets.filter(is_active=True, revisions__valid_to__isnull=True).distinct()
     return render(request, "catalog/target_list.html", {"targets": targets})
 
 
@@ -356,6 +360,10 @@ def target_detail(request, slug):
             "target": target,
             "current_revision": target.current_revision,
             "revisions": target.revisions.all(),
+            "latest_execution": Execution.objects.filter(run__target=target)
+            .select_related("build_snapshot", "run")
+            .order_by("-completed_at", "-pk")
+            .first(),
         },
     )
 
@@ -477,6 +485,13 @@ def question_detail(request, stable_id):
         ),
         stable_id=stable_id,
     )
+    execution_history = (
+        Execution.objects.filter(question=question)
+        .select_related("run", "target_snapshot", "build_snapshot", "current_human_review", "question_version")
+        .order_by("-completed_at", "-pk")
+    )
+    page = Paginator(execution_history, 50).get_page(request.GET.get("page"))
+    prepare_runtime_telemetry_for_display(page.object_list)
     return render(
         request,
         "catalog/question_detail.html",
@@ -484,6 +499,9 @@ def question_detail(request, stable_id):
             "question": question,
             "current_version": question.current_version,
             "versions": question.versions.all(),
+            "execution_page": page,
+            "question_trends": question_trend_rows(question.pk),
+            "latency_statistics": latency_statistics(list(execution_history[:500])),
         },
     )
 

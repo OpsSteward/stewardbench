@@ -50,6 +50,7 @@ from .models import (
     SemanticComparisonResult,
     TargetSnapshot,
 )
+from .performance import PERFORMANCE_POLICY_VERSION, classify_latency, performance_comparison, token_delta
 from .semantic import (
     SemanticComparator,
     SemanticComparatorFailure,
@@ -849,6 +850,43 @@ def record_exact_comparison(*, current_execution: Execution):
         .prefetch_related("resolved_bindings")
         .get(pk=current.baseline_execution_id)
     )
+    completed_pair = (
+        baseline_execution.outcome == Execution.Outcome.SUCCESS
+        and current.outcome == Execution.Outcome.SUCCESS
+    )
+    performance = performance_comparison(
+        baseline_execution.latency_ms if completed_pair else None,
+        current.latency_ms if completed_pair else None,
+    )
+    input_delta, input_percent = token_delta(
+        baseline_execution.input_tokens if completed_pair else None,
+        current.input_tokens if completed_pair else None,
+    )
+    output_delta, output_percent = token_delta(
+        baseline_execution.output_tokens if completed_pair else None,
+        current.output_tokens if completed_pair else None,
+    )
+    total_delta, total_percent = token_delta(
+        baseline_execution.total_tokens if completed_pair else None,
+        current.total_tokens if completed_pair else None,
+    )
+    performance_values = {
+        "performance_policy_version": PERFORMANCE_POLICY_VERSION,
+        "baseline_latency_ms": performance["baseline_latency_ms"],
+        "current_latency_ms": performance["current_latency_ms"],
+        "latency_delta_ms": performance["latency_delta_ms"],
+        "latency_delta_percent": performance["latency_delta_percent"],
+        "baseline_performance_classification": performance["baseline_band"] or "",
+        "current_performance_classification": performance["current_band"] or "",
+        "performance_change": performance["state"],
+        "performance_band_degraded": performance["band_degraded"],
+        "input_token_delta": input_delta,
+        "output_token_delta": output_delta,
+        "total_token_delta": total_delta,
+        "input_token_delta_percent": input_percent,
+        "output_token_delta_percent": output_percent,
+        "total_token_delta_percent": total_percent,
+    }
     if (
         current.run.comparison_baseline_id != comparison.baseline_id
         or not BaselineMembership.objects.filter(
@@ -865,6 +903,7 @@ def record_exact_comparison(*, current_execution: Execution):
             detail="The current replay does not reference immutable membership of its selected Baseline.",
             baseline_human_review=baseline_execution.current_human_review,
             current_human_review=current_review,
+            **performance_values,
         )
     non_comparable = _comparison_non_comparable_reason(baseline_execution, current)
     if non_comparable:
@@ -878,6 +917,7 @@ def record_exact_comparison(*, current_execution: Execution):
             detail=detail,
             baseline_human_review=baseline_execution.current_human_review,
             current_human_review=current_review,
+            **performance_values,
         )
     baseline_normalized = normalize_exact_answer(baseline_execution.display_answer or baseline_execution.raw_answer)
     current_normalized = normalize_exact_answer(current.display_answer or current.raw_answer)
@@ -894,6 +934,7 @@ def record_exact_comparison(*, current_execution: Execution):
         current_normalized_hash=_exact_hash(current_normalized),
         baseline_human_review=baseline_execution.current_human_review,
         current_human_review=current_review,
+        **performance_values,
     )
     if not exact_equal and current.review_state != Execution.ReviewState.REVIEWED:
         ReviewTracking.objects.create(
@@ -2330,6 +2371,10 @@ def _finalize_locked_execution(execution: Execution, *, outcome, values, now):
     execution.completed_at = now
     if execution.started_at:
         execution.latency_ms = max(0, int((now - execution.started_at).total_seconds() * 1000))
+    execution.performance_policy_version = PERFORMANCE_POLICY_VERSION
+    execution.performance_classification = (
+        classify_latency(execution.latency_ms) if outcome == Execution.Outcome.SUCCESS else ""
+    ) or ""
     execution.save()
 
 
@@ -2851,6 +2896,12 @@ def _process_conversation_claim(claim: ExecutionClaim, execution: Execution):
                 "display_answer": submission.raw_answer,
                 "evidence": submission.evidence if submission.evidence is not None else {},
                 "response_metadata": submission.response_metadata,
+                "input_tokens": submission.input_tokens,
+                "output_tokens": submission.output_tokens,
+                "total_tokens": submission.total_tokens,
+                "token_usage_metadata": submission.token_usage_metadata,
+                "runtime_telemetry": submission.runtime_telemetry,
+                "internal_timing_metadata": submission.internal_timing_metadata,
                 "target_correlation_id": submission.target_correlation_id,
                 "adapter_key": submission.adapter_key,
                 "adapter_version": submission.adapter_version,
@@ -2948,6 +2999,12 @@ def process_claim(claim: ExecutionClaim):
                 "display_answer": submission.raw_answer,
                 "evidence": submission.evidence if submission.evidence is not None else {},
                 "response_metadata": submission.response_metadata,
+                "input_tokens": submission.input_tokens,
+                "output_tokens": submission.output_tokens,
+                "total_tokens": submission.total_tokens,
+                "token_usage_metadata": submission.token_usage_metadata,
+                "runtime_telemetry": submission.runtime_telemetry,
+                "internal_timing_metadata": submission.internal_timing_metadata,
                 "target_correlation_id": submission.target_correlation_id,
                 "adapter_key": submission.adapter_key,
                 "adapter_version": submission.adapter_version,

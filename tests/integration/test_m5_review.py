@@ -98,6 +98,14 @@ def _observation_fingerprint(execution):
         "adapter_version": execution.adapter_version,
         "completed_at": execution.completed_at,
         "latency_ms": execution.latency_ms,
+        "performance_policy_version": execution.performance_policy_version,
+        "performance_classification": execution.performance_classification,
+        "input_tokens": execution.input_tokens,
+        "output_tokens": execution.output_tokens,
+        "total_tokens": execution.total_tokens,
+        "token_usage_metadata": execution.token_usage_metadata,
+        "runtime_telemetry": execution.runtime_telemetry,
+        "internal_timing_metadata": execution.internal_timing_metadata,
     }
 
 

@@ -385,6 +385,16 @@ class Execution(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    # External request timing and target-reported telemetry are deliberately
+    # separate immutable Execution evidence.
+    performance_policy_version = models.CharField(max_length=80, default="opss-performance-v1")
+    performance_classification = models.CharField(max_length=16, blank=True)
+    input_tokens = models.PositiveIntegerField(null=True, blank=True)
+    output_tokens = models.PositiveIntegerField(null=True, blank=True)
+    total_tokens = models.PositiveIntegerField(null=True, blank=True)
+    token_usage_metadata = models.JSONField(default=dict, blank=True)
+    runtime_telemetry = models.JSONField(default=dict, blank=True)
+    internal_timing_metadata = models.JSONField(default=dict, blank=True)
     review_state = models.CharField(
         max_length=12,
         choices=ReviewState.choices,
@@ -1155,6 +1165,21 @@ class ComparisonItem(models.Model):
     current_normalized_hash = models.CharField(max_length=64, blank=True)
     non_comparable_reason = models.CharField(max_length=120, blank=True)
     detail = models.TextField(blank=True)
+    performance_policy_version = models.CharField(max_length=80, default="opss-performance-v1")
+    baseline_latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    current_latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    latency_delta_ms = models.IntegerField(null=True, blank=True)
+    latency_delta_percent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    baseline_performance_classification = models.CharField(max_length=16, blank=True)
+    current_performance_classification = models.CharField(max_length=16, blank=True)
+    performance_change = models.CharField(max_length=16, blank=True)
+    performance_band_degraded = models.BooleanField(default=False)
+    input_token_delta = models.IntegerField(null=True, blank=True)
+    output_token_delta = models.IntegerField(null=True, blank=True)
+    total_token_delta = models.IntegerField(null=True, blank=True)
+    input_token_delta_percent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    output_token_delta_percent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    total_token_delta_percent = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     baseline_human_review = models.ForeignKey(
         HumanReview,
         null=True,

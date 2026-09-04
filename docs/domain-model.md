@@ -523,3 +523,14 @@ IDs are text identifiers that support dots and hyphens. HistoricalFixture fixed
 parameters use PostgreSQL JSONB only for the deliberately variable, non-secret
 input context authorized above; identities, lifecycle, validity, and filtered
 catalog dimensions remain relational.
+
+### M10 performance invariants
+
+`Execution.latency_ms` is the immutable StewardBench-observed request latency;
+target internal timing is separate optional telemetry. Performance classification
+uses the explicit policy version and never changes HumanReview. Nullable,
+target-reported input/output/total tokens remain unknown when absent and never
+become zero. Retries create new telemetry observations; semantic/judge work
+cannot rewrite them. TIMEOUT and ERROR are execution outcomes, not completed
+response performance bands. Controlled ComparisonItems preserve raw latency and
+token deltas independently of answer comparison.

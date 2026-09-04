@@ -1,8 +1,9 @@
 # Target adapter contract
 
-Status: Authoritative v1 boundary; wire-level OpsSteward contracts remain an
-open integration question. This document specifies behavior, not code or a
-framework interface.
+Status: Authoritative v1 boundary. The supported OpsSteward chat contracts
+below were inspected from local authoritative source; live certification remains
+credential-dependent. This document specifies behavior, not code or a framework
+interface.
 
 ## Purpose
 
@@ -17,6 +18,55 @@ and v2 question APIs. Compatibility may be supplied by one adapter with
 negotiated variants or separately versioned adapters after the actual wire
 contracts are confirmed. Either shape must satisfy this normalized contract and
 remain behind the selected Django application's adapter boundary.
+
+## Current OpsSteward certification status
+
+Source inspection established a shared supported API shape. It does not make a
+configured deployment live-certified: StewardBench has no target credential in
+this environment. Neither version is certified merely because the
+product-neutral fake target passes deterministic contract tests.
+
+| Target | Adapter / contract status | Authentication | Runtime metadata | Conversation |
+| --- | --- | --- | --- | --- |
+| OpsSteward v1.0.4 production | CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED. Source tag `v1.0.4`: `apps/api/opssteward_api/routes/chat.py`, `apps/api/opssteward_api/models/api_models.py`, `apps/api/opssteward_api/routes/health.py`, `apps/api/opssteward_api/services/auth_service.py`, and chat-service tests. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | API accepts `conversation_id`, but source does not establish an M8-compatible open/reuse/close lifecycle; unsupported/not certified. |
+| OpsSteward v2 development | CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED. Development source: the same chat/health/auth routes and models plus `packages/model_serving/.../metrics.py`. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | Same normalized limitation; unsupported/not certified. |
+
+For both generations, `POST /chat` accepts a `ChatRequest` whose required core
+field is `message`; StewardBench sends `{conversation_id: null, message,
+mode: "auto", source: "auto"}`. Successful `ChatResponse` includes
+`conversation_id`, `interaction_id`, `text`, `evidence`, and `metadata`.
+401/403 map to authentication failure; other non-2xx responses remain adapter
+errors; urllib deadline expiry maps to timeout. v1.0.4 optionally reports
+`metadata.performance.ollama`; current source prefers
+`metadata.performance.model_serving` (and retains an Ollama-compatible alias).
+Those blocks can report prompt/completion/total tokens, model/provider, and
+internal stage timing. They are target-reported diagnostics, never a substitute
+for StewardBench external latency.
+
+### Explicit normalized telemetry mapping
+
+StewardBench does not recursively scrape target responses. Its source-derived
+mapping is deliberately narrow and optional:
+
+| OpsSteward source field | StewardBench execution evidence | Notes |
+| --- | --- | --- |
+| v1 `metadata.performance.ollama.prompt_tokens` | `input_tokens` | Target-reported; absent/malformed remains unknown. |
+| v1 `metadata.performance.ollama.completion_tokens` | `output_tokens` | Target-reported; never estimated. |
+| v1 `metadata.performance.ollama.total_tokens` | `total_tokens` | Preserved only as OpsSteward defines it. |
+| v1 `metadata.performance.ollama.provider`, `.model` | `runtime_telemetry.provider_or_runtime`, `.model` | Context, not correctness authority. |
+| v2 `metadata.performance.model_serving.prompt_tokens`, `.completion_tokens`, `.total_tokens` | `input_tokens`, `output_tokens`, `total_tokens` | Current v2 model-serving metrics; the documented Ollama alias remains accepted where supplied. |
+| v2 `metadata.performance.model_serving.providers[0]`, `.models[0]` | `runtime_telemetry.provider_or_runtime`, `.model` | Only the target's explicitly reported primary values are mapped. |
+| Numeric top-level values in `metadata.performance` or explicit internal-timing block | `internal_timing_metadata` | Target diagnostics; distinct from externally observed latency. |
+
+`Execution.latency_ms` / exported `observed_latency_ms` is measured by
+StewardBench around the complete adapter request. It includes network and
+target response processing, excludes worker queue wait and runtime metadata
+discovery, and is the sole source for the versioned performance band.
+
+When approved evidence is supplied, document the concrete facts separately for
+v1 and v2 and implement one versioned adapter per materially different contract.
+Do not infer a route or build identity from the UI, GitHub, a health endpoint,
+or the other product version.
 
 ## Responsibilities
 
@@ -210,27 +260,25 @@ configuration creates a new TargetRevision. Historical responses remain bound
 to the prior revision and are never reparsed destructively; later derived
 normalizations/evaluations are appended with their versions if needed.
 
-## Proposed optional OpsSteward runtime metadata contract
+## Supported OpsSteward runtime metadata
 
-OpsSteward may later expose a small read-only endpoint. The route is deliberately
-unselected pending product API review. A conceptual successful JSON payload is:
+The source-derived `GET /version` route is a small read-only build-identity
+response. A successful response provides the following currently supported
+shape (fields other than `product` may be absent):
 
 ```json
 {
-  "schema_version": "1",
   "product": "OpsSteward",
-  "product_version": "2.0.0-dev",
-  "git_sha": "0123456789abcdef",
-  "build_id": "build-2026-09-03.1",
-  "image_sha": "sha256:optional"
+  "version": "2.0.0-dev",
+  "source_sha": "0123456789abcdef",
+  "build_time": "2026-09-03T00:00:00Z"
 }
 ```
 
 Contract requirements:
 
-- `schema_version` enables additive evolution;
 - `product` is required if the endpoint responds successfully;
-- `product_version`, `git_sha`, `build_id`, and `image_sha` are nullable/optional;
+- `version`, `source_sha`, and `build_time` are nullable/optional;
 - unknown additional fields are tolerated and may be preserved as safe raw
   metadata;
 - missing fields are not empty-string substitutes for known values;
@@ -250,10 +298,11 @@ call GitHub to reconstruct it.
 
 ## Acceptance examples for later implementation
 
-1. An OpsSteward v1 target with no metadata endpoint still executes questions;
-   version/SHA may remain unknown or admin-declared.
-2. An OpsSteward v2 target opens one session, attempts all conversation turns in
-   order after a turn-level error, and retains the full transcript.
+1. An OpsSteward v1 target with an unavailable `/version` endpoint still
+   executes questions; version/SHA may remain unknown or admin-declared.
+2. The native OpsSteward `/chat` API does not establish M8-compatible session
+   lifecycle behavior merely by accepting `conversation_id`; this adapter
+   correctly refuses to advertise conversation support.
 3. A 401/403 produces AUTHENTICATION_FAILED without persisting credentials and
    without a human BAD result.
 4. A 200 response lacking the documented answer is MALFORMED_RESPONSE rather

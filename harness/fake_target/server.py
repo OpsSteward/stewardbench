@@ -43,6 +43,7 @@ class FakeTargetState:
             "build_id": "fake-build-1",
         }
     )
+    telemetry: dict = field(default_factory=dict)
     control_token: str = field(default_factory=lambda: secrets.token_urlsafe(24))
     journal: list[dict] = field(default_factory=list)
     conversation_journal: list[dict] = field(default_factory=list)
@@ -206,6 +207,7 @@ class FakeTargetState:
                 "mode": mode,
                 "response_delay_seconds": scripted.get("delay_seconds", self.delay_seconds),
                 "answer": scripted.get("answer"),
+                "telemetry": scripted.get("telemetry", self.telemetry),
             }
             self.journal.append(entry)
             return entry
@@ -376,7 +378,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "answer": answer,
                 "evidence": self.state.evidence,
                 "correlation_id": request_id,
-                "metadata": {"fake_mode": mode},
+                "metadata": {"fake_mode": mode, "telemetry": entry["telemetry"]},
             }
             return self._send(200, json.dumps(envelope, ensure_ascii=False).encode("utf-8"))
         finally:
@@ -451,7 +453,7 @@ class _Handler(BaseHTTPRequestHandler):
                         "answer": answer,
                         "evidence": self.state.evidence,
                         "correlation_id": request_id,
-                        "metadata": {"fake_mode": mode, "session_id": session_id},
+                        "metadata": {"fake_mode": mode, "session_id": session_id, "telemetry": entry["telemetry"]},
                     },
                     ensure_ascii=False,
                 ).encode("utf-8"),

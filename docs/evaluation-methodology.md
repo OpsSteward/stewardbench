@@ -385,3 +385,21 @@ a future Judge v2 or comparator can operate without rerunning the product. Such
 work must append versioned results. v1 does not include historical bulk
 regrading, and future regrading never changes what the original evaluator or
 human recorded.
+
+## Performance and efficiency dimension (M10)
+
+A controlled comparison answers independently: did answer content/quality
+change, did externally observed latency improve or regress, and did
+target-reported token use change? `opss-performance-v1` applies the documented
+integer-millisecond bands. A meaningful latency regression requires both at
+least 25% slower and at least 500 ms slower; band degradation remains visible
+separately. Thus GOOD→GOOD can be performance-regressed, BAD→GOOD can be slower,
+and GOOD→BAD can be faster. Baseline performance is historical evidence, not an
+SLO. INVALID executions are preserved but excluded from normal benchmark
+aggregates; errors/timeouts are shown independently.
+
+Latency p50/p90/p95 use the centralized nearest-rank method over valid
+successful completed responses, with the displayed sample count. They are
+operational summaries, not a significance claim for small samples. Run wall
+duration and terminal-questions-per-minute are reported separately from each
+request's externally observed latency.

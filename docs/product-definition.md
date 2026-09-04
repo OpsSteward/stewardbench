@@ -261,3 +261,15 @@ blueprint's proposed milestones and repository structure.
 
 See [Reference material](reference/README.md) and
 [Evaluation methodology](evaluation-methodology.md).
+
+## M10 performance and efficiency evidence
+
+Human GOOD/BAD remains the operator's assessment of answer accuracy and
+usefulness only. Each Execution also retains StewardBench-observed end-to-end
+request latency, excluding worker queue wait, as immutable benchmark evidence.
+`opss-performance-v1` classifies completed responses as TARGET (≤1 s), GOOD
+(≤2 s), ACCEPTABLE (≤5 s), SLOW (≤10 s), or BAD (>10 s). Target-reported token
+usage and runtime/model identity are first-class efficiency/context evidence
+when supplied, but tokens have no global GOOD/BAD classification. Answer,
+execution outcome, performance, efficiency, and baseline change remain
+orthogonal.

@@ -103,11 +103,10 @@ meaning remains visible.
 
 ### Performance trend
 
-Include one compact chronological visualization initially focused on question
-latency and total run duration. Later add throughput and p50/p90/p95 only when
-captured data supports them. Sequential/parallel mode, target, and concurrency
-must be visible in tooltip/filter context so unlike runs are not misleadingly
-compared.
+Include compact chronological latency and run-duration views. M10 also exposes
+p50/p90/p95, throughput, and token medians in accessible tables when captured
+data supports them. Sequential/parallel mode, target, and concurrency must be
+visible in tooltip/filter context so unlike runs are not misleadingly compared.
 
 ## Questions list
 
@@ -423,13 +422,15 @@ trends:
 - REQUIRED count over time;
 - answer-change rate over time;
 - question latency over time; and
-- total run duration over time.
+- total run duration over time;
+- latency p50/p90/p95; and
+- median input/output/total target-reported tokens where available.
 
-Later throughput and percentile charts use already captured timing. Every point
-retains product, target, version, Git SHA/build, timestamp, QuestionVersion, run
-mode, and concurrency as applicable through tooltip, label, filters, or linked
-detail. Charts must expose missing identity as unknown rather than grouping it
-under fabricated values.
+Run-level throughput is presented alongside, never in place of, per-question
+latency. Every point retains product, target, version, Git SHA/build, timestamp,
+QuestionVersion, run mode, and concurrency as applicable through tooltip,
+label, filters, or linked detail. Charts must expose missing identity as unknown
+rather than grouping it under fabricated values.
 
 ## Export
 
@@ -437,11 +438,13 @@ Export is subordinate to the review loop. If inexpensive:
 
 - CSV exports the filtered tabular view with at least question ID/text/version,
   target/build, executed time, execution/automated/human/review/change states,
-  latency, and validity; and
+  observed latency, performance policy/band/delta, target-reported tokens,
+  runtime/model context, and validity; and
 - JSON exports a complete run with run/target/build identity, exact question and
   bindings, raw and display answers, raw response, evidence, all evaluator/judge
   identities and results, human reviews, comparison state, comments, validity,
-  and timing.
+  timing, performance-policy assessment, target-reported telemetry, and
+  baseline performance/efficiency comparison evidence.
 
 JSON preserves Unicode and structured types. Both formats exclude usable
 credentials and clearly mark unknown/legacy fields. No PDF, email, scheduled,
@@ -473,3 +476,14 @@ future variants are specified in [Brand assets](assets/brand/README.md).
 - Detailed evidence is collapsed by default but always reachable.
 - Unknown data is displayed as `Unknown`, not blank in a way that suggests a
   known empty value.
+
+## M10 performance presentation
+
+Operational views label answer and performance badges explicitly, so two
+different meanings of GOOD cannot be confused. Dashboard and list links expose
+URL-addressable performance-band, regression, band-degradation, and token
+availability sets. Run and question history show p50/p90/p95 external latency,
+sample count, throughput separately from per-question latency, and target token
+medians where reported. Comparison views show baseline/current latency, band,
+raw delta, percentage, tokens, and runtime/model context side by side. Charts
+remain supplementary to accessible tables.

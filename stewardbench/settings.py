@@ -154,6 +154,11 @@ WORKER_HEARTBEAT_SECONDS = positive_int_env("WORKER_HEARTBEAT_SECONDS", 10, maxi
 if WORKER_HEARTBEAT_SECONDS >= WORKER_LEASE_SECONDS:
     raise ImproperlyConfigured("WORKER_HEARTBEAT_SECONDS must be smaller than WORKER_LEASE_SECONDS")
 
+# Deployment may set this non-secret identifier at build time.  It is not
+# inferred from a repository checkout and exports honestly retain "unknown"
+# when deployment did not provide one.
+STEWARD_BENCH_APPLICATION_VERSION = os.environ.get("STEWARD_BENCH_APPLICATION_VERSION", "unknown")
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -1,11 +1,13 @@
 import uuid
+from io import StringIO
 from urllib.parse import parse_qs, urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Case, IntegerField, OuterRef, Prefetch, Subquery, Value, When
-from django.http import JsonResponse
+from django.core.paginator import Paginator
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
@@ -31,8 +33,22 @@ from .models import (
     EvaluationRun,
     EvaluationInvocation,
     Execution,
+    HumanReview,
     LLMJudgeResult,
     SemanticComparisonResult,
+)
+from .reporting import (
+    comparison_csv_row,
+    csv_rows,
+    filter_comparisons,
+    execution_csv_row,
+    filter_comparison_items,
+    filter_executions,
+    filter_options,
+    filter_runs,
+    run_performance_metrics,
+    prepare_runtime_telemetry_for_display,
+    run_export,
 )
 from .services import (
     append_execution_comment,
@@ -83,12 +99,48 @@ def _filters_from_request(request):
     }
 
 
+def _filter_query(request, *, drop: tuple[str, ...] = ("page",)):
+    """Persist canonical GET filters through paging/export links."""
+
+    preserved = request.GET.copy()
+    for key in drop:
+        preserved.pop(key, None)
+    return preserved.urlencode()
+
+
+def _csv_response(*, filename: str, columns: list[str], rows):
+    """Return a bounded synchronous CSV response for the v1-sized corpus."""
+
+    output = StringIO(newline="")
+    import csv
+
+    writer = csv.writer(output)
+    writer.writerow(columns)
+    writer.writerows(csv_rows(rows, columns))
+    response = HttpResponse(output.getvalue(), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @login_required
 def run_list(request):
     runs = EvaluationRun.objects.select_related(
-        "target", "target__product", "target__environment", "build_snapshot", "launched_by", "source_run"
+        "target", "target__product", "target__environment", "target_revision", "build_snapshot", "launched_by", "source_run"
     )
-    return render(request, "evaluations/run_list.html", {"runs": runs})
+    runs = filter_runs(runs, request.GET)
+    page = Paginator(runs, 50).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "evaluations/run_list.html",
+        {
+            "page": page,
+            "filter_query": _filter_query(request),
+            "filter_options": filter_options(),
+            "states": EvaluationRun.State.choices,
+            "modes": EvaluationRun.ExecutionMode.choices,
+        },
+    )
 
 
 @login_required
@@ -113,6 +165,9 @@ def run_detail(request, run_id):
         .prefetch_related("resolved_bindings")
         .order_by("question_order")
     )
+    executions = filter_executions(executions, request.GET)
+    execution_page = Paginator(executions, 50).get_page(request.GET.get("page"))
+    prepare_runtime_telemetry_for_display(execution_page.object_list)
     return render(
         request,
         "evaluations/run_detail.html",
@@ -120,12 +175,143 @@ def run_detail(request, run_id):
             "run": run,
             "progress": run_progress(run),
             "review_metrics": run_review_metrics(run),
-            "executions": executions,
+            "performance_metrics": run_performance_metrics(run),
+            "executions": execution_page,
+            "execution_page": execution_page,
+            "filter_query": _filter_query(request),
+            "filter_options": filter_options(),
             "run_comment_form": CommentForm(),
             "baseline_promotion_form": BaselinePromotionForm(),
             "conversation_attempt": getattr(run, "conversation_attempt", None),
         },
     )
+
+
+@login_required
+def execution_list(request):
+    """Attention and review queue list used by dashboard drill-down links."""
+
+    executions = (
+        Execution.objects.select_related(
+            "run",
+            "run__target",
+            "question",
+            "question__domain",
+            "target_snapshot",
+            "build_snapshot",
+            "current_human_review",
+            "conversation_attempt",
+        )
+        .prefetch_related("question__tags")
+        .order_by("-completed_at", "-pk")
+    )
+    executions = filter_executions(executions, request.GET)
+    page = Paginator(executions, 50).get_page(request.GET.get("page"))
+    prepare_runtime_telemetry_for_display(page.object_list)
+    return render(
+        request,
+        "evaluations/execution_list.html",
+        {
+            "page": page,
+            "filter_query": _filter_query(request),
+            "filter_options": filter_options(),
+            "outcomes": Execution.Outcome.choices,
+            "validities": Execution.Validity.choices,
+            "review_states": Execution.ReviewState.choices,
+            "human_judgments": HumanReview.Judgment.choices,
+            "change_states": ComparisonItem.ChangeState.choices,
+            "semantic_outcomes": SemanticComparisonResult.Outcome.choices,
+        },
+    )
+
+
+@login_required
+def execution_csv_export(request):
+    executions = (
+        Execution.objects.select_related("run", "target_snapshot", "build_snapshot", "current_human_review")
+        .order_by("-completed_at", "-pk")
+    )
+    executions = filter_executions(executions, request.GET)
+    columns = [
+        "execution_id",
+        "run_id",
+        "question_id",
+        "question_version",
+        "question",
+        "product",
+        "environment",
+        "target",
+        "build_version",
+        "build_id",
+        "git_sha",
+        "executed_at",
+        "outcome",
+        "observed_latency_ms",
+        "performance_policy_version",
+        "performance_classification",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "runtime",
+        "model",
+        "validity",
+        "human_judgment",
+        "review_state",
+        "raw_answer",
+        "display_answer",
+    ]
+    return _csv_response(filename="stewardbench-executions.csv", columns=columns, rows=(execution_csv_row(row) for row in executions))
+
+
+@login_required
+def run_csv_export(request, run_id):
+    run = get_object_or_404(EvaluationRun, pk=run_id)
+    executions = filter_executions(
+        run.executions.select_related("run", "target_snapshot", "build_snapshot", "current_human_review").order_by("question_order"),
+        request.GET,
+    )
+    columns = [
+        "execution_id",
+        "run_id",
+        "question_id",
+        "question_version",
+        "question",
+        "product",
+        "environment",
+        "target",
+        "build_version",
+        "build_id",
+        "git_sha",
+        "executed_at",
+        "outcome",
+        "observed_latency_ms",
+        "performance_policy_version",
+        "performance_classification",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "runtime",
+        "model",
+        "validity",
+        "human_judgment",
+        "review_state",
+        "raw_answer",
+        "display_answer",
+    ]
+    return _csv_response(
+        filename=f"stewardbench-run-{run.pk}-executions.csv",
+        columns=columns,
+        rows=(execution_csv_row(row) for row in executions),
+    )
+
+
+@login_required
+def run_json_export(request, run_id):
+    run = get_object_or_404(EvaluationRun, pk=run_id)
+    response = JsonResponse(run_export(run), json_dumps_params={"ensure_ascii": False, "indent": 2})
+    response["Content-Disposition"] = f'attachment; filename="stewardbench-run-{run.pk}.json"'
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @login_required
@@ -271,6 +457,9 @@ def execution_detail(request, execution_id):
             ),
         )
         .first()
+    )
+    prepare_runtime_telemetry_for_display(
+        (execution, comparison_item.baseline_execution) if comparison_item else (execution,)
     )
     semantic_history = list(comparison_item.semantic_results.all()) if comparison_item else []
     current_semantic_result = _current_semantic_result_from_history(semantic_history)
@@ -515,10 +704,17 @@ def comparison_list(request):
         "current_run__target_snapshot",
         "current_run__build_snapshot",
     ).all()
+    comparisons = filter_comparisons(comparisons, request.GET)
+    page = Paginator(comparisons, 50).get_page(request.GET.get("page"))
     return render(
         request,
         "evaluations/comparison_list.html",
-        {"comparison_rows": [(comparison, comparison_summary(comparison)) for comparison in comparisons]},
+        {
+            "page": page,
+            "comparison_rows": [(comparison, comparison_summary(comparison)) for comparison in page],
+            "filter_query": _filter_query(request),
+            "filter_options": filter_options(),
+        },
     )
 
 
@@ -547,38 +743,7 @@ def comparison_detail(request, comparison_id):
         "current_execution__target_snapshot",
         "current_execution__build_snapshot",
     ).prefetch_related(Prefetch("semantic_results", queryset=current_semantic_results))
-    selected_state = request.GET.get("state", "")
-    selected_outcome = request.GET.get("outcome", "")
-    selected_review = request.GET.get("review", "")
-    selected_transition = request.GET.get("transition", "")
-    selected_semantic = request.GET.get("semantic", "")
-    if selected_state in ComparisonItem.ChangeState.values:
-        items = items.filter(change_state=selected_state)
-    if selected_outcome in (Execution.Outcome.ERROR, Execution.Outcome.TIMEOUT):
-        items = items.filter(current_execution__outcome=selected_outcome)
-    if selected_review == Execution.ReviewState.REQUIRED:
-        items = items.filter(current_execution__review_state=selected_review)
-    if selected_semantic in SemanticComparisonResult.Outcome.values:
-        items = items.filter(
-            semantic_results__superseded_by__isnull=True,
-            semantic_results__outcome=selected_semantic,
-        )
-    elif selected_semantic == "NOT_RUN":
-        items = items.filter(change_state=ComparisonItem.ChangeState.CHANGED).exclude(
-            pk__in=SemanticComparisonResult.objects.filter(
-                superseded_by__isnull=True
-            ).values("comparison_item_id")
-        )
-    if selected_transition == "GOOD_TO_BAD":
-        items = items.filter(
-            baseline_execution__current_human_review__judgment="GOOD",
-            current_execution__current_human_review__judgment="BAD",
-        )
-    if selected_transition == "BAD_TO_GOOD":
-        items = items.filter(
-            baseline_execution__current_human_review__judgment="BAD",
-            current_execution__current_human_review__judgment="GOOD",
-        )
+    items = filter_comparison_items(items, request.GET)
     items = items.annotate(
         semantic_outcome=Subquery(semantic_outcome),
         triage_priority=Case(
@@ -589,29 +754,39 @@ def comparison_detail(request, comparison_id):
                 then=Value(2),
             ),
             When(
-                semantic_outcome__in=(
-                    SemanticComparisonResult.Outcome.MATERIAL_CHANGE,
-                    SemanticComparisonResult.Outcome.UNCERTAIN,
-                    SemanticComparisonResult.Outcome.ERROR,
-                ),
-                current_execution__review_state=Execution.ReviewState.REQUIRED,
+                current_execution__current_human_review__judgment="BAD",
                 then=Value(3),
             ),
             When(
+                semantic_outcome=SemanticComparisonResult.Outcome.MATERIAL_CHANGE,
+                then=Value(4),
+            ),
+            When(
+                semantic_outcome=SemanticComparisonResult.Outcome.UNCERTAIN,
+                then=Value(5),
+            ),
+            When(
+                semantic_outcome=SemanticComparisonResult.Outcome.ERROR,
+                then=Value(6),
+            ),
+            When(change_state=ComparisonItem.ChangeState.NON_COMPARABLE, then=Value(7)),
+            When(
                 change_state=ComparisonItem.ChangeState.CHANGED,
                 current_execution__review_state=Execution.ReviewState.REQUIRED,
-                then=Value(3),
+                then=Value(8),
             ),
             When(
                 baseline_execution__current_human_review__judgment="BAD",
                 current_execution__current_human_review__judgment="GOOD",
-                then=Value(4),
+                then=Value(9),
             ),
-            When(change_state=ComparisonItem.ChangeState.NON_COMPARABLE, then=Value(5)),
-            default=Value(6),
+            default=Value(10),
             output_field=IntegerField(),
         )
     ).order_by("triage_priority", "current_execution__question_order")
+    page = Paginator(items, 50).get_page(request.GET.get("page"))
+    for item in page.object_list:
+        prepare_runtime_telemetry_for_display((item.baseline_execution, item.current_execution))
     return render(
         request,
         "evaluations/comparison_detail.html",
@@ -624,14 +799,74 @@ def comparison_detail(request, comparison_id):
                     comparison_human_transition(item),
                     _current_semantic_result_from_history(item.semantic_results.all()),
                 )
-                for item in items
+                for item in page
             ],
-            "selected_state": selected_state,
-            "selected_outcome": selected_outcome,
-            "selected_review": selected_review,
-            "selected_transition": selected_transition,
-            "selected_semantic": selected_semantic,
+            "page": page,
+            "filter_query": _filter_query(request),
+            "selected_state": request.GET.get("state", ""),
+            "selected_outcome": request.GET.get("outcome", ""),
+            "selected_review": request.GET.get("review", ""),
+            "selected_transition": request.GET.get("transition", ""),
+            "selected_semantic": request.GET.get("semantic", ""),
+            "selected_performance_change": request.GET.get("performance_change", ""),
+            "selected_band_degraded": request.GET.get("band_degraded", ""),
+            "selected_sort": request.GET.get("sort", ""),
         },
+    )
+
+
+@login_required
+def comparison_csv_export(request, comparison_id):
+    comparison = get_object_or_404(Comparison, pk=comparison_id)
+    items = (
+        comparison.items.select_related("comparison", "baseline_execution", "current_execution")
+        .prefetch_related("semantic_results")
+        .order_by("current_execution__question_order")
+    )
+    items = filter_comparison_items(items, request.GET)
+    columns = [
+        "comparison_id",
+        "comparison_item_id",
+        "run_id",
+        "question_id",
+        "question_version",
+        "current_outcome",
+        "validity",
+        "review_state",
+        "exact_change_state",
+        "semantic_result",
+        "human_transition",
+        "baseline_latency_ms",
+        "current_latency_ms",
+        "latency_delta_ms",
+        "latency_delta_percent",
+        "baseline_performance_classification",
+        "current_performance_classification",
+        "performance_change",
+        "performance_band_degraded",
+        "baseline_input_tokens",
+        "current_input_tokens",
+        "input_token_delta",
+        "input_token_delta_percent",
+        "baseline_output_tokens",
+        "current_output_tokens",
+        "output_token_delta",
+        "output_token_delta_percent",
+        "baseline_total_tokens",
+        "current_total_tokens",
+        "total_token_delta",
+        "total_token_delta_percent",
+        "baseline_runtime",
+        "current_runtime",
+        "baseline_model",
+        "current_model",
+        "baseline_answer",
+        "current_answer",
+    ]
+    return _csv_response(
+        filename=f"stewardbench-comparison-{comparison.pk}.csv",
+        columns=columns,
+        rows=(comparison_csv_row(item) for item in items),
     )
 
 
