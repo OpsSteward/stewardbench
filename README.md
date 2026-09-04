@@ -1,5 +1,13 @@
 # StewardBench
 
+[![Stability](https://img.shields.io/badge/stability-beta-yellow.svg)](https://github.com/OpsSteward/stewardbench)
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/OpsSteward/stewardbench/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/badge/release-v1.0.0-brightgreen.svg)](https://github.com/OpsSteward/stewardbench/releases/tag/v1.0.0)
+[![Tests](https://img.shields.io/badge/tests-197%20passing-brightgreen.svg)](https://github.com/OpsSteward/stewardbench)
+[![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://github.com/OpsSteward/stewardbench)
+[![Django](https://img.shields.io/badge/Django-5.2%20LTS-blue.svg)](https://github.com/OpsSteward/stewardbench)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue.svg)](https://github.com/OpsSteward/stewardbench)
+
 **StewardBench — AI Network Operations Evaluation Platform**
 
 StewardBench is an implementation-independent platform for evaluating and
