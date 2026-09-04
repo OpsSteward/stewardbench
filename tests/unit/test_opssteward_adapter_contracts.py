@@ -12,10 +12,16 @@ import json
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
 from evaluations.adapters import AdapterFailure, ConversationFailure, adapter_for
+from evaluations.operator_answers import OPERATOR_ANSWER_METADATA_KEY, OPERATOR_ANSWER_SCHEMA_VERSION
+
+
+FIXTURE_DIRECTORY = Path(__file__).parents[1] / "fixtures"
+V1_TABLE_RESPONSE = json.loads((FIXTURE_DIRECTORY / "opss_v1_table_response.json").read_text())
 
 
 V1_CHAT_RESPONSE = {
@@ -135,6 +141,49 @@ def test_source_derived_chat_contract_fixtures(adapter_key, chat_response, expec
         "Content-Type": "application/json",
         "X-StewardBench-Request-ID": "steward-correlation",
     }
+
+
+def test_source_derived_v1_table_response_preserves_complete_operator_answer():
+    """The observed table envelope is normalized without changing raw capture."""
+
+    with _contract_server(chat_response=V1_TABLE_RESPONSE) as (endpoint, _journal):
+        submission = adapter_for("opss-v1-chat").submit_question(
+            endpoint=endpoint,
+            credential="fixture-session",
+            request_id="steward-correlation",
+            question="List all network devices.",
+            timeout_seconds=2,
+        )
+
+    expected = {
+        "schema_version": OPERATOR_ANSWER_SCHEMA_VERSION,
+        "answer_type": "text",
+        "text": "Device inventory for production network devices:",
+        "response_kind": "table",
+        "response_payload": V1_TABLE_RESPONSE["response_payload"],
+    }
+    assert json.loads(submission.raw_response) == V1_TABLE_RESPONSE
+    assert submission.raw_answer == expected["text"]
+    assert submission.response_metadata[OPERATOR_ANSWER_METADATA_KEY] == expected
+    assert (submission.normalizer_key, submission.normalizer_version) == ("opss-structured-answer", "1")
+
+
+def test_unknown_response_kind_remains_structured_operator_evidence():
+    unknown = dict(V1_TABLE_RESPONSE)
+    unknown["response_kind"] = "matrix-vnext"
+    unknown["response_payload"] = {"cells": [["synthetic"]]}
+    with _contract_server(chat_response=unknown) as (endpoint, _journal):
+        submission = adapter_for("opss-v1-chat").submit_question(
+            endpoint=endpoint,
+            credential="fixture-session",
+            request_id="steward-correlation",
+            question="List all network devices.",
+            timeout_seconds=2,
+        )
+
+    operator_answer = submission.response_metadata[OPERATOR_ANSWER_METADATA_KEY]
+    assert operator_answer["response_kind"] == "matrix-vnext"
+    assert operator_answer["response_payload"] == {"cells": [["synthetic"]]}
 
 
 @pytest.mark.parametrize("adapter_key", ["opss-v1-chat", "opss-v2-chat"])

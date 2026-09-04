@@ -50,6 +50,7 @@ from .models import (
     SemanticComparisonResult,
     TargetSnapshot,
 )
+from .operator_answers import exact_operator_answer, semantic_operator_answer
 from .performance import PERFORMANCE_POLICY_VERSION, classify_latency, performance_comparison, token_delta
 from .semantic import (
     SemanticComparator,
@@ -768,7 +769,7 @@ def normalize_exact_answer(value: str) -> str:
     answer facts.
     """
 
-    return "\n".join(line.rstrip(" \t") for line in value.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+    return exact_operator_answer(display_answer=value, raw_answer="", response_metadata={})
 
 
 def _exact_hash(value: str) -> str:
@@ -919,8 +920,16 @@ def record_exact_comparison(*, current_execution: Execution):
             current_human_review=current_review,
             **performance_values,
         )
-    baseline_normalized = normalize_exact_answer(baseline_execution.display_answer or baseline_execution.raw_answer)
-    current_normalized = normalize_exact_answer(current.display_answer or current.raw_answer)
+    baseline_normalized = exact_operator_answer(
+        display_answer=baseline_execution.display_answer,
+        raw_answer=baseline_execution.raw_answer,
+        response_metadata=baseline_execution.response_metadata,
+    )
+    current_normalized = exact_operator_answer(
+        display_answer=current.display_answer,
+        raw_answer=current.raw_answer,
+        response_metadata=current.response_metadata,
+    )
     exact_equal = baseline_normalized == current_normalized
     item = ComparisonItem.objects.create(
         comparison=comparison,
@@ -964,7 +973,11 @@ def _semantic_applicability_reason(item: ComparisonItem) -> str | None:
 
 
 def _semantic_answer(execution: Execution) -> str:
-    return execution.display_answer or execution.raw_answer
+    return semantic_operator_answer(
+        display_answer=execution.display_answer,
+        raw_answer=execution.raw_answer,
+        response_metadata=execution.response_metadata,
+    )
 
 
 def _semantic_input_for_item(item: ComparisonItem) -> SemanticComparatorInput:
@@ -1104,7 +1117,11 @@ def _evaluation_bindings(execution: Execution) -> tuple[tuple[str, str], ...]:
 
 
 def _stored_answer(execution: Execution) -> str:
-    return execution.display_answer or execution.raw_answer
+    return semantic_operator_answer(
+        display_answer=execution.display_answer,
+        raw_answer=execution.raw_answer,
+        response_metadata=execution.response_metadata,
+    )
 
 
 def _evaluator_input(execution: Execution, configuration: dict | None = None) -> EvaluatorInput:
@@ -2905,6 +2922,8 @@ def _process_conversation_claim(claim: ExecutionClaim, execution: Execution):
                 "target_correlation_id": submission.target_correlation_id,
                 "adapter_key": submission.adapter_key,
                 "adapter_version": submission.adapter_version,
+                "normalizer_key": submission.normalizer_key,
+                "normalizer_version": submission.normalizer_version,
                 "completed_at": submission.completed_at,
             },
         )
@@ -3008,6 +3027,8 @@ def process_claim(claim: ExecutionClaim):
                 "target_correlation_id": submission.target_correlation_id,
                 "adapter_key": submission.adapter_key,
                 "adapter_version": submission.adapter_version,
+                "normalizer_key": submission.normalizer_key,
+                "normalizer_version": submission.normalizer_version,
                 "completed_at": submission.completed_at,
             },
         )

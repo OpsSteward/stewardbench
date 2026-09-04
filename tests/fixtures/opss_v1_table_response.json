@@ -1,0 +1,28 @@
+{
+  "conversation_id": "synthetic-table-conversation",
+  "interaction_id": "synthetic-table-interaction",
+  "answer_type": "text",
+  "text": "Device inventory for production network devices:",
+  "response_kind": "table",
+  "response_payload": {
+    "columns": ["Device", "Role", "Site"],
+    "rows": [
+      ["synthetic-border-01", "router", "lab-east"],
+      ["synthetic-core-02", "switch", "lab-west"]
+    ]
+  },
+  "evidence": [
+    {"source": "synthetic-source-derived-table-fixture"}
+  ],
+  "metadata": {
+    "performance": {
+      "ollama": {
+        "prompt_tokens": 12,
+        "completion_tokens": 34,
+        "total_tokens": 46,
+        "provider": "synthetic-ollama",
+        "model": "synthetic-v1"
+      }
+    }
+  }
+}

@@ -34,6 +34,7 @@ from .models import (
     LLMJudgeResult,
     SemanticComparisonResult,
 )
+from .operator_answers import structured_operator_answer
 from .performance import PERFORMANCE_BANDS, PERFORMANCE_POLICY_VERSION, classify_latency, performance_comparison, token_delta
 from .services import comparison_human_transition, comparison_summary, run_progress, run_review_metrics
 
@@ -565,6 +566,7 @@ def _execution_export(execution: Execution) -> dict[str, Any]:
                 "raw_response": execution.raw_response,
                 "raw_answer": execution.raw_answer,
                 "display_answer": execution.display_answer,
+                "operator_answer": structured_operator_answer(execution.response_metadata),
                 "evidence": execution.evidence,
                 "response_metadata": execution.response_metadata,
                 "target_correlation_id": execution.target_correlation_id or None,

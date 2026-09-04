@@ -37,6 +37,7 @@ from .models import (
     LLMJudgeResult,
     SemanticComparisonResult,
 )
+from .operator_answers import operator_answer_presentation
 from .reporting import (
     comparison_csv_row,
     csv_rows,
@@ -470,6 +471,7 @@ def execution_detail(request, execution_id):
         "evaluations/execution_detail.html",
         {
             "execution": execution,
+            "execution_operator_answer": operator_answer_presentation(execution.response_metadata),
             "review_form": HumanReviewForm(),
             "execution_comment_form": CommentForm(),
             "review_state_form": ReviewStateForm(),
@@ -485,6 +487,11 @@ def execution_detail(request, execution_id):
             "next_required": next_required,
             "comparison_item": comparison_item,
             "comparison_transition": comparison_human_transition(comparison_item) if comparison_item else None,
+            "baseline_operator_answer": (
+                operator_answer_presentation(comparison_item.baseline_execution.response_metadata)
+                if comparison_item
+                else None
+            ),
             "semantic_history": semantic_history,
             "current_semantic_result": current_semantic_result,
             "current_automated_results": current_automated_results(execution),

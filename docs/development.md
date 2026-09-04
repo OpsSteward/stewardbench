@@ -293,8 +293,12 @@ frozen input that cannot safely be replayed is persisted as NON_COMPARABLE and
 is completed without a target submission.
 
 M6 comparison uses `exact-v1`: line ending normalization plus trailing
-horizontal-whitespace normalization only. Equal normalized answers are
-UNCHANGED; unequal answers are CHANGED and set the current Execution to
+horizontal-whitespace normalization only. For a versioned structured
+operator-answer representation, that same shallow normalization applies to
+each text value before deterministic JSON serialization, so table columns,
+rows, and cells participate in exact equality. Plain-text answers retain the
+original text-only behavior. Equal normalized answers are UNCHANGED; unequal
+answers are CHANGED and set the current Execution to
 REQUIRED unless a later legitimate review already made it REVIEWED. Neither
 state determines GOOD/BAD or regression. ERROR/TIMEOUT, invalidity, and human
 GOOD/BAD transitions stay separate. In particular, an answer equal to a BAD
@@ -303,6 +307,13 @@ Comparison records and their per-pair hashes/reasons are immutable. The
 comparison list/detail and execution workstation expose M6 summary counters,
 URL-addressable triage filters, NON_COMPARABLE reasons, and baseline/current
 answers with their independent target/build, review, and validity context.
+
+Structured operator answers are included in the JSON run export as a
+machine-readable `observation.operator_answer` object (and retain their
+immutable response-metadata copy). CSV remains the scalar operational view:
+it keeps `raw_answer` and `display_answer` but intentionally does not flatten
+arbitrary target tables into a lossy cell. CSV formula protection therefore
+continues to apply only to its documented scalar fields.
 
 ## M7 conservative semantic triage
 

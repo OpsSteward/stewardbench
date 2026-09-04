@@ -21,14 +21,14 @@ remain behind the selected Django application's adapter boundary.
 
 ## Current OpsSteward certification status
 
-Source inspection established a shared supported API shape. It does not make a
-configured deployment live-certified: StewardBench has no target credential in
-this environment. Neither version is certified merely because the
-product-neutral fake target passes deterministic contract tests.
+Source inspection established a shared supported API shape. Live certification
+remains target-specific: an initial v1 deployment observation established the
+structured table response below, but neither version is certified merely because
+the product-neutral fake target passes deterministic contract tests.
 
 | Target | Adapter / contract status | Authentication | Runtime metadata | Conversation |
 | --- | --- | --- | --- | --- |
-| OpsSteward v1.0.4 production | CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED. Source tag `v1.0.4`: `apps/api/opssteward_api/routes/chat.py`, `apps/api/opssteward_api/models/api_models.py`, `apps/api/opssteward_api/routes/health.py`, `apps/api/opssteward_api/services/auth_service.py`, and chat-service tests. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | API accepts `conversation_id`, but source does not establish an M8-compatible open/reuse/close lifecycle; unsupported/not certified. |
+| OpsSteward v1.0.4 production | CONTRACT_IMPLEMENTED_LIVE_CERTIFICATION_IN_PROGRESS. Source tag `v1.0.4`: `apps/api/opssteward_api/routes/chat.py`, `apps/api/opssteward_api/models/api_models.py`, `apps/api/opssteward_api/routes/health.py`, `apps/api/opssteward_api/services/auth_service.py`, and chat-service tests. The initial live `/chat` response also established the table shape below. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | API accepts `conversation_id`, but source does not establish an M8-compatible open/reuse/close lifecycle; unsupported/not certified. |
 | OpsSteward v2 development | CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED. Development source: the same chat/health/auth routes and models plus `packages/model_serving/.../metrics.py`. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | Same normalized limitation; unsupported/not certified. |
 
 For both generations, `POST /chat` accepts a `ChatRequest` whose required core
@@ -42,6 +42,35 @@ errors; urllib deadline expiry maps to timeout. v1.0.4 optionally reports
 Those blocks can report prompt/completion/total tokens, model/provider, and
 internal stage timing. They are target-reported diagnostics, never a substitute
 for StewardBench external latency.
+
+### Source-derived structured operator answer
+
+The first v1 live certification response had `answer_type: "text"`, heading
+text, `response_kind: "table"`, and a `response_payload` object containing
+ordered `columns` and ordered `rows`. This payload is semantically part of the
+operator answer; the heading alone is not a complete observation.
+
+The adapter preserves the redacted raw response unchanged and also stores a
+versioned immutable `operator_answer` object in Execution response metadata:
+
+```json
+{
+  "schema_version": "opss-structured-answer-v1",
+  "answer_type": "text",
+  "text": "Device inventory for production network devices:",
+  "response_kind": "table",
+  "response_payload": {"columns": ["..."], "rows": [["..."]]}
+}
+```
+
+The observed rectangular table is rendered through StewardBench-owned table
+markup with all target strings escaped. It is never treated as target-supplied
+HTML. Exact comparison canonically includes every stored structured value;
+semantic comparison, evaluators, and the LLM judge receive the same complete
+data-only representation. Unknown future `response_kind` values and malformed
+table shapes remain preserved evidence and are displayed as escaped JSON rather
+than silently dropped or guessed into markup. Plain-text responses without
+structured fields retain their prior text behavior.
 
 ### Explicit normalized telemetry mapping
 

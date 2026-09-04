@@ -18,6 +18,11 @@ from urllib import error, request
 
 from django.utils import timezone
 
+from .operator_answers import (
+    OPERATOR_ANSWER_METADATA_KEY,
+    OPERATOR_ANSWER_SCHEMA_VERSION,
+)
+
 
 MAX_CAPTURE_BYTES = 1_000_000
 # Key-based redaction must protect credentials without mistaking ordinary
@@ -83,6 +88,8 @@ class Submission:
     token_usage_metadata: dict[str, Any] = field(default_factory=dict)
     runtime_telemetry: dict[str, Any] = field(default_factory=dict)
     internal_timing_metadata: dict[str, Any] = field(default_factory=dict)
+    normalizer_key: str = "identity-display"
+    normalizer_version: str = "1"
 
 
 def _non_negative_int(value: Any) -> int | None:
@@ -635,6 +642,32 @@ class OpsStewardChatAdapter(FakeHTTPAdapter):
             continuity="UNUSABLE",
         )
 
+    @staticmethod
+    def _response_metadata(safe_body: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+        """Preserve source-derived structured answers alongside target metadata.
+
+        The raw response remains the original adapter capture. This separate,
+        versioned representation is declarative so generic comparison and
+        rendering paths do not need to parse an OpsSteward wire envelope. An
+        unknown future ``response_kind`` remains preserved evidence.
+        """
+
+        metadata = dict(safe_body.get("metadata") if isinstance(safe_body.get("metadata"), dict) else {})
+        # This is an adapter-owned envelope, never a target-controlled
+        # metadata convention. A similarly named upstream key must not alter
+        # a plain-text answer's generic processing path.
+        metadata.pop(OPERATOR_ANSWER_METADATA_KEY, None)
+        if "response_kind" not in safe_body and "response_payload" not in safe_body:
+            return metadata, "identity-display", "1"
+        metadata[OPERATOR_ANSWER_METADATA_KEY] = {
+            "schema_version": OPERATOR_ANSWER_SCHEMA_VERSION,
+            "answer_type": safe_body.get("answer_type"),
+            "text": safe_body["text"],
+            "response_kind": safe_body.get("response_kind"),
+            "response_payload": safe_body.get("response_payload"),
+        }
+        return metadata, "opss-structured-answer", "1"
+
     def submit_question(self, *, endpoint, credential, request_id, question, timeout_seconds):
         payload = {"conversation_id": None, "message": question, "mode": "auto", "source": "auto"}
         safe_request = {"method": "POST", "path": "/chat", "headers": {"Content-Type": "application/json", "X-StewardBench-Request-ID": request_id}, "body": payload}
@@ -665,12 +698,16 @@ class OpsStewardChatAdapter(FakeHTTPAdapter):
             raise AdapterFailure("MALFORMED_RESPONSE", "OpsSteward response did not contain the supported complete chat fields.", protocol_status=status, raw_response=raw_response, raw_request=safe_request)
         safe_body = redact_value(body, (credential or "",))
         telemetry = normalized_telemetry(safe_body)
+        response_metadata, normalizer_key, normalizer_version = self._response_metadata(safe_body)
         return Submission(
             adapter_key=self.key, adapter_version=self.version, started_at=started_at, completed_at=completed_at,
             protocol_status=status, raw_request=safe_request, raw_response=raw_response, raw_answer=safe_body["text"],
             evidence=safe_body.get("evidence") if isinstance(safe_body.get("evidence"), list) else {},
-            response_metadata=safe_body.get("metadata") if isinstance(safe_body.get("metadata"), dict) else {},
-            target_correlation_id=str(safe_body.get("interaction_id", "")), **telemetry,
+            response_metadata=response_metadata,
+            target_correlation_id=str(safe_body.get("interaction_id", "")),
+            normalizer_key=normalizer_key,
+            normalizer_version=normalizer_version,
+            **telemetry,
         )
 
     def runtime_metadata(self, *, endpoint, credential, timeout_seconds):

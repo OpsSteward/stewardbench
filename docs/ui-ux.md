@@ -233,7 +233,10 @@ Show prominently:
 - resolved bindings;
 - product/target/build/timestamp;
 - execution outcome and any safe error summary;
-- current normalized/display answer without hiding access to raw answer;
+- complete operator-facing answer without hiding access to raw answer; a
+  recognized structured table uses StewardBench-owned `<table>` markup with
+  escaped target cells, while an unknown response kind is visibly retained as
+  escaped JSON rather than omitted;
 - independent automated result(s);
 - LLM-judge result and dimensions when available;
 - comparison/change status and reason;
