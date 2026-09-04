@@ -6,6 +6,13 @@ x-app: &app
     args:
       STEWARDBENCH_INSTALL_TEST_DEPS: "true"
   image: stewardbench:local
+  # Compose uses .env for interpolation but does not otherwise pass arbitrary
+  # values from it to containers.  Application target credentials are symbolic
+  # names, so the app services must also load the deployment env file itself.
+  # A disposable test/deployment may override only this path while retaining
+  # normal Compose interpolation through its own --env-file argument.
+  env_file:
+    - ${STEWARD_BENCH_APP_ENV_FILE:-.env}
   environment:
     DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
     DJANGO_DEBUG: ${DJANGO_DEBUG:-false}

@@ -31,6 +31,28 @@ poll interval, and log level are optional environment configuration. Keep
 deployment. Terminate TLS at the deployment proxy and configure trusted origins
 for the deployed HTTPS origin. Never put `.env` into an image or commit it.
 
+Compose uses the deployment `.env` both to interpolate the documented fixed
+configuration and, for `web` and `worker` only, as an application `env_file`.
+The latter is required because Compose interpolation alone does not inject an
+arbitrary symbolic target credential into a container. Consequently every
+`STEWARD_BENCH_TARGET_CREDENTIAL_<NORMALIZED_REFERENCE>` in the external
+deployment file is available at runtime to both application roles without a
+product-specific Compose entry. The `db` service does not load this file and
+therefore does not receive target credentials.
+
+The ordinary deployment command uses the project `.env` automatically. When a
+deployment instead uses `docker compose --env-file /secure/path/.env`, pass the
+same non-secret path for the application env file as well:
+
+```bash
+STEWARD_BENCH_APP_ENV_FILE=/secure/path/.env \
+  docker compose --env-file /secure/path/.env up -d web worker
+```
+
+`STEWARD_BENCH_APP_ENV_FILE` selects the file only; it is not a credential.
+Keep that file external to the repository and do not render its contents with
+`docker compose config` in logs or support tickets.
+
 ## Docker topology
 
 `compose.yaml` defines three long-running services:
