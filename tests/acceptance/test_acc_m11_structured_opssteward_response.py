@@ -22,6 +22,7 @@ from evaluations.adapters import credential_environment_name
 from evaluations.evaluators import JUDGE_DIMENSIONS, DeterministicFakeJudge
 from evaluations.models import ComparisonItem, Execution
 from evaluations.operator_answers import OPERATOR_ANSWER_METADATA_KEY
+from evaluations.reporting import target_adapter_statuses
 from evaluations.semantic import DeterministicFakeSemanticComparator
 from evaluations.services import (
     create_baseline,
@@ -53,6 +54,20 @@ def _opssteward_chat_server(*responses):
             request_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
             journal.append({"path": self.path, "headers": dict(self.headers), "body": json.loads(request_body)})
             payload = pending.popleft()
+            encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def do_GET(self):  # noqa: N802 - stdlib hook
+            payload = {
+                "product": "OpsSteward",
+                "version": "1.0.4",
+                "source_sha": "unknown",
+                "build_time": "unknown",
+            }
             encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -261,3 +276,49 @@ def test_acc_m11_unknown_response_kind_is_preserved_and_safely_degraded(client, 
     assert "<script>unknown-kind</script>" not in rendered
     assert "=2+2" in rendered
     assert execution.response_metadata[OPERATOR_ANSWER_METADATA_KEY]["response_payload"] == response["response_payload"]
+
+
+@pytest.mark.acceptance
+@pytest.mark.django_db
+def test_acc_m11_operational_status_requires_complete_live_certification_evidence(minimal_domain, monkeypatch):
+    """ACC-M11-LIVE-001: only a complete stored OpsSteward evidence set is live certified."""
+
+    credential_reference = "fixtures/m11-live-certification"
+    monkeypatch.setenv(credential_environment_name(credential_reference), "m11-live-certification-canary")
+    table = copy.deepcopy(TABLE_FIXTURE)
+    table["metadata"] = {}
+    summary = {
+        "conversation_id": "live-summary-conversation",
+        "interaction_id": "live-summary-interaction",
+        "text": "Structured summary text",
+        "answer_type": "text",
+        "response_kind": "summary",
+        "response_payload": {"citations": [{"source": "synthetic KB"}]},
+        "evidence": [],
+        "metadata": {
+            "performance": {
+                "ollama": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "total_tokens": 12,
+                    "provider": "synthetic",
+                    "model": "synthetic-model",
+                }
+            }
+        },
+    }
+    with _opssteward_chat_server(table, summary) as (endpoint, _journal):
+        values = _revision_values(endpoint, credential_reference=credential_reference, build="live-certification")
+        values["adapter_version"] = "v1.0.4"
+        values["supports_runtime_metadata"] = True
+        create_target_revision(
+            actor=minimal_domain["admin"],
+            target=minimal_domain["target"],
+            **values,
+        )
+        _execute(actor=minimal_domain["admin"], target=minimal_domain["target"], question=minimal_domain["question"])
+        _execute(actor=minimal_domain["admin"], target=minimal_domain["target"], question=minimal_domain["question"])
+
+    status = next(row for row in target_adapter_statuses() if row["target"].pk == minimal_domain["target"].pk)
+    assert status["certification"] == "LIVE_CERTIFIED"
+    assert "Conversation remains unsupported" in status["certification_detail"]

@@ -91,6 +91,24 @@ and worker state. PostgreSQL data—not a container filesystem—is authoritativ
 the named volume requires host-level backup/restore planning. Mapping files and
 the workbook are repository-controlled and need no separate mutable backup.
 
+### PostgreSQL backup
+
+Before a deployment that could affect the persistent database, create a
+custom-format dump on protected host storage. The command obtains database
+credentials only inside the database container and does not print them:
+
+```bash
+umask 077
+docker compose exec -T db sh -lc \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+  > /protected-backups/stewardbench-$(date -u +%Y%m%dT%H%M%SZ).dump
+```
+
+Record the dump path, SHA-256, and deployment/release identity with the
+operational change. Test restoration only against an isolated PostgreSQL
+database; do not drop or overwrite the active `postgres_data` volume as part of
+normal release work.
+
 TLS termination, firewalling, and reverse-proxy policy remain deployment
 responsibilities. Production must not run debug mode or example credentials,
 and public registration is not available.
@@ -142,14 +160,16 @@ without a fixed value, or a configured marker absent from the template, creates
 an Execution `ERROR` with `BINDING_CONFIGURATION_ERROR` and sends no target
 request. M3 deliberately has no dynamic resolver.
 
-The only executable M3 target wire contract is the reusable deterministic
-`fake-http` adapter. It sends `POST <endpoint>/question` with an immutable
+The reusable deterministic `fake-http` adapter remains the executable M3 test
+contract. It sends `POST <endpoint>/question` with an immutable
 request correlation UUID and accepts only a complete JSON envelope containing
 `complete: true` and a string `answer`. Its optional `GET <endpoint>/metadata`
 lookup is non-fatal: declared launch values and runtime-discovered metadata are
-retained separately, with unknown/unavailable state shown explicitly. Exact
-OpsSteward v1/v2 question and metadata routes remain an integration open item;
-no route or schema is guessed or hard-coded.
+retained separately, with unknown/unavailable state shown explicitly.
+OpsSteward v1.0.4 Production is separately live certified for the versioned
+`opss-v1-chat` adapter at `/api/chat` and `/api/version`; v2 routes and session
+lifecycle remain integration open items. No generic fake-target route or schema
+is inferred for another product.
 
 For a TargetRevision with a non-empty credential reference, the runtime worker
 resolves it only from an environment variable named

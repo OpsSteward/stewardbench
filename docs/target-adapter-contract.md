@@ -1,9 +1,8 @@
 # Target adapter contract
 
-Status: Authoritative v1 boundary. The supported OpsSteward chat contracts
-below were inspected from local authoritative source; live certification remains
-credential-dependent. This document specifies behavior, not code or a framework
-interface.
+Status: Authoritative v1 boundary. OpsSteward v1.0.4 Production is
+`LIVE_CERTIFIED` from retained real-target evidence; this document specifies
+behavior, not code or a framework interface.
 
 ## Purpose
 
@@ -21,17 +20,18 @@ remain behind the selected Django application's adapter boundary.
 
 ## Current OpsSteward certification status
 
-Source inspection established a shared supported API shape. Live certification
-remains target-specific: an initial v1 deployment observation established the
-structured table response below, but neither version is certified merely because
-the product-neutral fake target passes deterministic contract tests.
+Source inspection established a shared supported API shape. Certification remains
+target-specific: a product-neutral fake target cannot certify a real deployment.
+The real v1.0.4 Production target has now met the evidence requirements below;
+v2 remains unconfigured and uncertified.
 
 | Target | Adapter / contract status | Authentication | Runtime metadata | Conversation |
 | --- | --- | --- | --- | --- |
-| OpsSteward v1.0.4 production | CONTRACT_IMPLEMENTED_LIVE_CERTIFICATION_IN_PROGRESS. Source tag `v1.0.4`: `apps/api/opssteward_api/routes/chat.py`, `apps/api/opssteward_api/models/api_models.py`, `apps/api/opssteward_api/routes/health.py`, `apps/api/opssteward_api/services/auth_service.py`, and chat-service tests. The initial live `/chat` response also established the table shape below. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | API accepts `conversation_id`, but source does not establish an M8-compatible open/reuse/close lifecycle; unsupported/not certified. |
+| OpsSteward v1.0.4 production | `LIVE_CERTIFIED`. Real session-cookie requests to the external `/api` prefix successfully captured `/api/chat` table and summary answers, observed `/api/version`, external latency, optional telemetry, and unknown telemetry without fabrication. | `opssteward_session` server-side session cookie | `GET /api/version`: product, version, source_sha, build_time | API accepts `conversation_id`, but source does not establish an M8-compatible open/reuse/close lifecycle; unsupported/not certified. |
 | OpsSteward v2 development | CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED. Development source: the same chat/health/auth routes and models plus `packages/model_serving/.../metrics.py`. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | Same normalized limitation; unsupported/not certified. |
 
-For both generations, `POST /chat` accepts a `ChatRequest` whose required core
+For both generations, `POST /chat` (concretely `POST /api/chat` for the
+certified v1 Production deployment) accepts a `ChatRequest` whose required core
 field is `message`; StewardBench sends `{conversation_id: null, message,
 mode: "auto", source: "auto"}`. Successful `ChatResponse` includes
 `conversation_id`, `interaction_id`, `text`, `evidence`, and `metadata`.
@@ -43,12 +43,14 @@ Those blocks can report prompt/completion/total tokens, model/provider, and
 internal stage timing. They are target-reported diagnostics, never a substitute
 for StewardBench external latency.
 
-### Source-derived structured operator answer
+### Certified structured operator answer
 
-The first v1 live certification response had `answer_type: "text"`, heading
-text, `response_kind: "table"`, and a `response_payload` object containing
-ordered `columns` and ordered `rows`. This payload is semantically part of the
-operator answer; the heading alone is not a complete observation.
+The certified v1 live table response had `answer_type: "text"`, heading text,
+`response_kind: "table"`, and a `response_payload` object containing ordered
+`columns` and ordered `rows`. This payload is semantically part of the operator
+answer; the heading alone is not a complete observation. A separate certified
+v1 response had `response_kind: "summary"` with generated text, citations, and
+knowledge-base metadata; it is retained as data, not collapsed to heading text.
 
 The adapter preserves the redacted raw response unchanged and also stores a
 versioned immutable `operator_answer` object in Execution response metadata:
@@ -85,7 +87,7 @@ mapping is deliberately narrow and optional:
 | v1 `metadata.performance.ollama.provider`, `.model` | `runtime_telemetry.provider_or_runtime`, `.model` | Context, not correctness authority. |
 | v2 `metadata.performance.model_serving.prompt_tokens`, `.completion_tokens`, `.total_tokens` | `input_tokens`, `output_tokens`, `total_tokens` | Current v2 model-serving metrics; the documented Ollama alias remains accepted where supplied. |
 | v2 `metadata.performance.model_serving.providers[0]`, `.models[0]` | `runtime_telemetry.provider_or_runtime`, `.model` | Only the target's explicitly reported primary values are mapped. |
-| Numeric top-level values in `metadata.performance` or explicit internal-timing block | `internal_timing_metadata` | Target diagnostics; distinct from externally observed latency. |
+| Numeric top-level values in `metadata.performance` or explicit internal-timing block | `internal_timing_metadata` | Target diagnostics; distinct from externally observed latency. Valid nested `ollama` and `model_serving` envelopes are mapped as telemetry, not mislabeled as malformed scalar timings. |
 
 `Execution.latency_ms` / exported `observed_latency_ms` is measured by
 StewardBench around the complete adapter request. It includes network and
@@ -291,9 +293,10 @@ normalizations/evaluations are appended with their versions if needed.
 
 ## Supported OpsSteward runtime metadata
 
-The source-derived `GET /version` route is a small read-only build-identity
-response. A successful response provides the following currently supported
-shape (fields other than `product` may be absent):
+The source-derived read-only version route is `GET /version` relative to an
+adapter endpoint. The certified Production endpoint is therefore
+`GET /api/version`. A successful response provides the following currently
+supported shape (fields other than `product` may be absent):
 
 ```json
 {
@@ -327,7 +330,7 @@ call GitHub to reconstruct it.
 
 ## Acceptance examples for later implementation
 
-1. An OpsSteward v1 target with an unavailable `/version` endpoint still
+1. An OpsSteward v1 target with an unavailable version endpoint still
    executes questions; version/SHA may remain unknown or admin-declared.
 2. The native OpsSteward `/chat` API does not establish M8-compatible session
    lifecycle behavior merely by accepting `conversation_id`; this adapter

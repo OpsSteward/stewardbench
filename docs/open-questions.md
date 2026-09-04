@@ -7,13 +7,14 @@ changes the specified behavior.
 
 ## Deployment-specific integration evidence
 
-1. **Exact OpsSteward v1 and v2 API contracts.** Confirm health, question
-   request/response, authentication, complete-answer behavior, errors, and v2
-   conversation/session semantics. Until confirmed, the adapter contract in
-   this repository is normative only at the StewardBench boundary.
-2. **Runtime metadata route and wire schema.** This documentation proposes a
-   minimal optional payload, but OpsSteward must confirm the route, field names,
-   authentication, and compatibility behavior.
+1. **Exact OpsSteward v2 API contract.** OpsSteward v1.0.4 Production is live
+   certified for session-cookie `/api/chat` and `/api/version`, including
+   complete answers, structured table/summary preservation, and optional
+   telemetry. Confirm the separate v2 request/response, health, error, and
+   conversation/session semantics before making any v2 certification claim.
+2. **OpsSteward v2 runtime metadata compatibility.** The v1 Production
+   `/api/version` route and fields are observed. A future v2 target must still
+   confirm its route, field names, authentication, and compatibility behavior.
 
 ## Resolved product-owner choices
 

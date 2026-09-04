@@ -162,7 +162,14 @@ def normalized_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
         for key, value in timings.items()
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
     }
+    # ``ollama`` and ``model_serving`` are the two source-derived nested
+    # telemetry envelopes.  They are consumed above for token/runtime fields;
+    # they are not scalar internal timings and therefore must not be reported
+    # as malformed merely for being mappings.
+    nested_telemetry_envelopes = {"ollama", "model_serving"}
     for key, value in timings.items():
+        if key in nested_telemetry_envelopes and isinstance(value, dict):
+            continue
         if not (isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0) and value is not None:
             diagnostics.append(f"malformed_timing_{str(key)[:80]}")
     if diagnostics:

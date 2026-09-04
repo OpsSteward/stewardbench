@@ -1049,11 +1049,52 @@ def target_adapter_statuses() -> list[dict[str, Any]]:
             certification = "TEST_PATH_VERIFIED"
             certification_detail = "Deterministic fake-target path is verified; this is not OpsSteward contract certification."
         elif revision.adapter_key in {"opss-v1-chat", "opss-v2-chat"}:
-            certification = "CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED"
-            certification_detail = (
-                "Source-derived /chat and /version fixtures verify the supported wire contract. "
-                "No configured target credentials have established live certification."
+            # Certification follows only stored observations for this target's
+            # current concrete adapter configuration.  Historical revisions
+            # may contribute evidence when their endpoint and adapter identity
+            # are identical (for example, a capability-only revision), but a
+            # different endpoint or adapter cannot silently certify the new
+            # configuration.
+            observed = Execution.objects.filter(
+                target_snapshot__target=target,
+                target_snapshot__endpoint=revision.endpoint,
+                adapter_key=revision.adapter_key,
+                adapter_version=revision.adapter_version,
+                outcome=Execution.Outcome.SUCCESS,
+                validity=Execution.Validity.VALID,
             )
+            has_runtime_identity = observed.filter(
+                build_snapshot__runtime_state="AVAILABLE",
+                build_snapshot__runtime_metadata__product="OpsSteward",
+                build_snapshot__runtime_metadata__product_version__isnull=False,
+            ).exists()
+            has_table = observed.filter(
+                response_metadata__operator_answer__response_kind="table",
+                latency_ms__isnull=False,
+            ).exists()
+            has_summary = observed.filter(
+                response_metadata__operator_answer__response_kind="summary",
+                latency_ms__isnull=False,
+            ).exists()
+            has_reported_tokens = observed.filter(total_tokens__isnull=False).exists()
+            has_absent_tokens = observed.filter(
+                input_tokens__isnull=True,
+                output_tokens__isnull=True,
+                total_tokens__isnull=True,
+            ).exists()
+            if all((has_runtime_identity, has_table, has_summary, has_reported_tokens, has_absent_tokens)):
+                certification = "LIVE_CERTIFIED"
+                certification_detail = (
+                    "Matching immutable live observations establish authenticated /chat capture, "
+                    "structured table and summary preservation, external latency, observed runtime "
+                    "identity, and both present and absent target telemetry. Conversation remains unsupported."
+                )
+            else:
+                certification = "CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED"
+                certification_detail = (
+                    "Source-derived /chat and /version fixtures verify the supported wire contract; "
+                    "the complete stored live-certification evidence set is not yet present."
+                )
         elif latest_execution and latest_execution.outcome == Execution.Outcome.SUCCESS:
             certification = "LIVE_EVALUATION_OBSERVED"
             certification_detail = "A complete answer was observed. Contract certification still requires approved wire evidence."

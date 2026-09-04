@@ -129,6 +129,7 @@ def test_source_derived_chat_contract_fixtures(adapter_key, chat_response, expec
     assert submission.total_tokens == total_tokens
     assert submission.runtime_telemetry["provider_or_runtime"] == runtime
     assert submission.runtime_telemetry["model"] == model
+    assert not submission.token_usage_metadata.get("diagnostics", [])
     assert journal[0]["path"] == "/chat"
     assert journal[0]["body"] == {
         "conversation_id": None,
