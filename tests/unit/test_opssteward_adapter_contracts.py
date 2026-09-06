@@ -109,13 +109,13 @@ def _contract_server(*, chat_status=200, chat_response=None, version_response=No
             V1_CHAT_RESPONSE,
             ("v1.0.4", 101, 202, 303, "Ollama", "v1-model"),
             "opssteward_session",
-            "opsssteward-2-0-session",
+            "opssteward-2-0-session",
         ),
         (
             "opss-v2-chat",
             V2_CHAT_RESPONSE,
             ("development", 401, 502, 903, "vLLM", "v2-model"),
-            "opsssteward-2-0-session",
+            "opssteward-2-0-session",
             "opssteward_session",
         ),
     ],
@@ -204,8 +204,8 @@ def test_unknown_response_kind_remains_structured_operator_evidence():
 @pytest.mark.parametrize(
     ("adapter_key", "cookie_name", "other_cookie_name"),
     [
-        ("opss-v1-chat", "opssteward_session", "opsssteward-2-0-session"),
-        ("opss-v2-chat", "opsssteward-2-0-session", "opssteward_session"),
+        ("opss-v1-chat", "opssteward_session", "opssteward-2-0-session"),
+        ("opss-v2-chat", "opssteward-2-0-session", "opssteward_session"),
     ],
 )
 def test_source_derived_version_contract_and_missing_optional_telemetry(adapter_key, cookie_name, other_cookie_name):

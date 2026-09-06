@@ -778,6 +778,6 @@ def adapter_for(key: str):
         return OpsStewardChatAdapter(
             key="opss-v2-chat",
             version="development",
-            session_cookie_name="opsssteward-2-0-session",
+            session_cookie_name="opssteward-2-0-session",
         )
     raise AdapterFailure("UNSUPPORTED_BEHAVIOR", f"No supported M3 adapter is configured for {key!r}.")
