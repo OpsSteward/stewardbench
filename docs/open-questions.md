@@ -7,14 +7,14 @@ changes the specified behavior.
 
 ## Deployment-specific integration evidence
 
-1. **Exact OpsSteward v2 API contract.** OpsSteward v1.0.4 Production is live
-   certified for session-cookie `/api/chat` and `/api/version`, including
-   complete answers, structured table/summary preservation, and optional
-   telemetry. Confirm the separate v2 request/response, health, error, and
-   conversation/session semantics before making any v2 certification claim.
-2. **OpsSteward v2 runtime metadata compatibility.** The v1 Production
-   `/api/version` route and fields are observed. A future v2 target must still
-   confirm its route, field names, authentication, and compatibility behavior.
+1. **OpsSteward v2 operational certification.** OpsSteward v1.0.4 Production
+   is live certified for session-cookie `/api/chat` and `/api/version`,
+   including complete answers, structured table/summary preservation, and
+   optional telemetry. A v2 Development live probe verifies `/api/chat`,
+   `/api/version`, its separate session-cookie name, the supported response
+   envelope, and a table response. Retained v2 evidence for health, errors,
+   and conversation/session semantics is still required before making any v2
+   certification claim.
 
 ## Resolved product-owner choices
 

@@ -102,20 +102,32 @@ def _contract_server(*, chat_status=200, chat_response=None, version_response=No
 
 
 @pytest.mark.parametrize(
-    ("adapter_key", "chat_response", "expected"),
+    ("adapter_key", "chat_response", "expected", "cookie_name", "other_cookie_name"),
     [
-        ("opss-v1-chat", V1_CHAT_RESPONSE, ("v1.0.4", 101, 202, 303, "Ollama", "v1-model")),
-        ("opss-v2-chat", V2_CHAT_RESPONSE, ("development", 401, 502, 903, "vLLM", "v2-model")),
+        (
+            "opss-v1-chat",
+            V1_CHAT_RESPONSE,
+            ("v1.0.4", 101, 202, 303, "Ollama", "v1-model"),
+            "opssteward_session",
+            "opsssteward-2-0-session",
+        ),
+        (
+            "opss-v2-chat",
+            V2_CHAT_RESPONSE,
+            ("development", 401, 502, 903, "vLLM", "v2-model"),
+            "opsssteward-2-0-session",
+            "opssteward_session",
+        ),
     ],
 )
-def test_source_derived_chat_contract_fixtures(adapter_key, chat_response, expected):
+def test_source_derived_chat_contract_fixtures(adapter_key, chat_response, expected, cookie_name, other_cookie_name):
     """POST /chat, typed response, cookie auth, and telemetry map explicitly."""
 
     with _contract_server(chat_response=chat_response) as (endpoint, journal):
         adapter = adapter_for(adapter_key)
         submission = adapter.submit_question(
             endpoint=endpoint,
-            credential="fixture-session",
+            credential="fixture-session-not-for-evidence",
             request_id="steward-correlation",
             question="Qual é o estado?",
             timeout_seconds=2,
@@ -137,11 +149,13 @@ def test_source_derived_chat_contract_fixtures(adapter_key, chat_response, expec
         "mode": "auto",
         "source": "auto",
     }
-    assert journal[0]["headers"]["Cookie"] == "opssteward_session=fixture-session"
+    assert journal[0]["headers"]["Cookie"] == f"{cookie_name}=fixture-session-not-for-evidence"
+    assert f"{other_cookie_name}=" not in journal[0]["headers"]["Cookie"]
     assert submission.raw_request["headers"] == {
         "Content-Type": "application/json",
         "X-StewardBench-Request-ID": "steward-correlation",
     }
+    assert "fixture-session-not-for-evidence" not in json.dumps(submission.raw_request)
 
 
 def test_source_derived_v1_table_response_preserves_complete_operator_answer():
@@ -187,8 +201,14 @@ def test_unknown_response_kind_remains_structured_operator_evidence():
     assert operator_answer["response_payload"] == {"cells": [["synthetic"]]}
 
 
-@pytest.mark.parametrize("adapter_key", ["opss-v1-chat", "opss-v2-chat"])
-def test_source_derived_version_contract_and_missing_optional_telemetry(adapter_key):
+@pytest.mark.parametrize(
+    ("adapter_key", "cookie_name", "other_cookie_name"),
+    [
+        ("opss-v1-chat", "opssteward_session", "opsssteward-2-0-session"),
+        ("opss-v2-chat", "opsssteward-2-0-session", "opssteward_session"),
+    ],
+)
+def test_source_derived_version_contract_and_missing_optional_telemetry(adapter_key, cookie_name, other_cookie_name):
     """GET /version maps build identity; absent optional telemetry preserves success."""
 
     response = {"conversation_id": "c", "interaction_id": "i", "text": "answer", "evidence": [], "metadata": {}}
@@ -208,11 +228,13 @@ def test_source_derived_version_contract_and_missing_optional_telemetry(adapter_
         "git_sha": "abc123",
         "build_time": "2026-09-04T00:00:00Z",
     }
+    assert journal[0]["headers"]["Cookie"] == f"{cookie_name}=session"
     assert journal[1]["path"] == "/version"
-    assert journal[1]["headers"]["Cookie"] == "opssteward_session=session"
+    assert journal[1]["headers"]["Cookie"] == f"{cookie_name}=session"
     assert health.status == "REACHABLE"
     assert journal[2]["path"] == "/health"
-    assert journal[2]["headers"]["Cookie"] == "opssteward_session=session"
+    assert journal[2]["headers"]["Cookie"] == f"{cookie_name}=session"
+    assert all(f"{other_cookie_name}=" not in entry["headers"].get("Cookie", "") for entry in journal)
 
 
 @pytest.mark.parametrize("adapter_key", ["opss-v1-chat", "opss-v2-chat"])

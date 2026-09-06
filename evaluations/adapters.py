@@ -624,9 +624,15 @@ class OpsStewardChatAdapter(FakeHTTPAdapter):
     key = "opss-chat"
     version = "1"
 
-    def __init__(self, *, key: str, version: str):
+    def __init__(self, *, key: str, version: str, session_cookie_name: str):
         self.key = key
         self.version = version
+        self.session_cookie_name = session_cookie_name
+
+    def _session_headers(self, credential: str | None) -> dict[str, str]:
+        if not credential:
+            return {}
+        return {"Cookie": f"{self.session_cookie_name}={credential}"}
 
     def open_conversation(self, **kwargs):
         raise ConversationFailure(
@@ -679,8 +685,7 @@ class OpsStewardChatAdapter(FakeHTTPAdapter):
         payload = {"conversation_id": None, "message": question, "mode": "auto", "source": "auto"}
         safe_request = {"method": "POST", "path": "/chat", "headers": {"Content-Type": "application/json", "X-StewardBench-Request-ID": request_id}, "body": payload}
         headers = dict(safe_request["headers"])
-        if credential:
-            headers["Cookie"] = "opssteward_session=" + credential
+        headers.update(self._session_headers(credential))
         req = request.Request(self._url(endpoint, "/chat"), data=json.dumps(payload, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST")
         started_at = timezone.now()
         try:
@@ -718,7 +723,7 @@ class OpsStewardChatAdapter(FakeHTTPAdapter):
         )
 
     def runtime_metadata(self, *, endpoint, credential, timeout_seconds):
-        headers = {"Cookie": "opssteward_session=" + credential} if credential else {}
+        headers = self._session_headers(credential)
         req = request.Request(self._url(endpoint, "/version"), headers=headers, method="GET")
         try:
             with request.urlopen(req, timeout=timeout_seconds) as response:  # noqa: S310 - configured target
@@ -741,7 +746,7 @@ class OpsStewardChatAdapter(FakeHTTPAdapter):
         change.  A health result remains advisory and is never certification.
         """
 
-        headers = {"Cookie": "opssteward_session=" + credential} if credential else {}
+        headers = self._session_headers(credential)
         req = request.Request(self._url(endpoint, "/health"), headers=headers, method="GET")
         started = timezone.now()
         try:
@@ -764,7 +769,15 @@ def adapter_for(key: str):
     if key in {"fake-http", "fixture"}:
         return FakeHTTPAdapter()
     if key == "opss-v1-chat":
-        return OpsStewardChatAdapter(key="opss-v1-chat", version="v1.0.4")
+        return OpsStewardChatAdapter(
+            key="opss-v1-chat",
+            version="v1.0.4",
+            session_cookie_name="opssteward_session",
+        )
     if key == "opss-v2-chat":
-        return OpsStewardChatAdapter(key="opss-v2-chat", version="development")
+        return OpsStewardChatAdapter(
+            key="opss-v2-chat",
+            version="development",
+            session_cookie_name="opsssteward-2-0-session",
+        )
     raise AdapterFailure("UNSUPPORTED_BEHAVIOR", f"No supported M3 adapter is configured for {key!r}.")

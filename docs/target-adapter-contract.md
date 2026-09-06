@@ -20,20 +20,21 @@ remain behind the selected Django application's adapter boundary.
 
 ## Current OpsSteward certification status
 
-Source inspection established a shared supported API shape. Certification remains
-target-specific: a product-neutral fake target cannot certify a real deployment.
-The real v1.0.4 Production target has now met the evidence requirements below;
-v2 remains unconfigured and uncertified.
+Source inspection and live probes established the supported API shape.
+Certification remains target-specific: a product-neutral fake target cannot
+certify a real deployment. The real v1.0.4 Production target has now met the
+evidence requirements below; v2 has a verified Development adapter contract but
+is not `LIVE_CERTIFIED`.
 
 | Target | Adapter / contract status | Authentication | Runtime metadata | Conversation |
 | --- | --- | --- | --- | --- |
 | OpsSteward v1.0.4 production | `LIVE_CERTIFIED`. Real session-cookie requests to the external `/api` prefix successfully captured `/api/chat` table and summary answers, observed `/api/version`, external latency, optional telemetry, and unknown telemetry without fabrication. | `opssteward_session` server-side session cookie | `GET /api/version`: product, version, source_sha, build_time | API accepts `conversation_id`, but source does not establish an M8-compatible open/reuse/close lifecycle; unsupported/not certified. |
-| OpsSteward v2 development | CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED. Development source: the same chat/health/auth routes and models plus `packages/model_serving/.../metrics.py`. | `opssteward_session` server-side session cookie | `GET /version`: product, version, source_sha, build_time | Same normalized limitation; unsupported/not certified. |
+| OpsSteward v2 development | CONTRACT_IMPLEMENTED_NOT_LIVE_CERTIFIED. A Development live probe verified `/api/chat`, `/api/version`, the supported chat envelope, and a structured table response. | `opsssteward-2-0-session` server-side session cookie | `GET /api/version`: product, version, source_sha, build_time | Same normalized limitation; unsupported/not certified. |
 
 For both generations, `POST /chat` (concretely `POST /api/chat` for the
-certified v1 Production deployment) accepts a `ChatRequest` whose required core
-field is `message`; StewardBench sends `{conversation_id: null, message,
-mode: "auto", source: "auto"}`. Successful `ChatResponse` includes
+certified v1 Production and verified v2 Development deployments) accepts a
+`ChatRequest` whose required core field is `message`; StewardBench sends
+`{conversation_id: null, message, mode: "auto", source: "auto"}`. Successful `ChatResponse` includes
 `conversation_id`, `interaction_id`, `text`, `evidence`, and `metadata`.
 401/403 map to authentication failure; other non-2xx responses remain adapter
 errors; urllib deadline expiry maps to timeout. v1.0.4 optionally reports
@@ -42,6 +43,12 @@ errors; urllib deadline expiry maps to timeout. v1.0.4 optionally reports
 Those blocks can report prompt/completion/total tokens, model/provider, and
 internal stage timing. They are target-reported diagnostics, never a substitute
 for StewardBench external latency.
+
+Authentication is explicit per adapter generation: `opss-v1-chat` sends the
+`opssteward_session` cookie, while `opss-v2-chat` sends
+`opsssteward-2-0-session`. Both use the same runtime-only symbolic credential
+reference mechanism; neither credential values nor cookie headers are retained
+in request evidence.
 
 ### Certified structured operator answer
 
