@@ -76,7 +76,9 @@ def semantic_operator_answer(*, display_answer: str, raw_answer: str, response_m
 def operator_answer_presentation(response_metadata: object) -> dict[str, Any] | None:
     """Build a safe declarative UI model; target content is never HTML.
 
-    Only the observed ``table`` shape with a rectangular ``columns``/``rows``
+    A recognized ``summary`` renders only its human-readable text; its variable
+    payload stays in immutable metadata and the collapsed raw evidence. Only
+    the observed ``table`` shape with a rectangular ``columns``/``rows``
     payload receives table markup. Any unknown response kind or malformed table
     is retained and shown as escaped JSON instead of being silently discarded
     or guessed into a different presentation.
@@ -96,10 +98,16 @@ def operator_answer_presentation(response_metadata: object) -> dict[str, Any] | 
         and all(isinstance(row, list) and len(row) == len(columns) for row in rows)
     ):
         table = {"columns": columns, "rows": rows}
+    summary = answer.get("response_kind") == "summary"
     return {
         "answer_type": answer.get("answer_type"),
         "text": answer.get("text", ""),
         "response_kind": answer.get("response_kind"),
         "table": table,
-        "fallback_json": json.dumps(answer, ensure_ascii=False, sort_keys=True, indent=2, default=str),
+        "summary": summary,
+        "fallback_json": (
+            None
+            if table is not None or summary
+            else json.dumps(answer, ensure_ascii=False, sort_keys=True, indent=2, default=str)
+        ),
     }

@@ -2,6 +2,8 @@
   {% if answer.text %}<pre class="pre-wrap">{{ answer.text }}</pre>{% endif %}
   {% if answer.table %}
     <div class="table-wrap"><table><thead><tr>{% for column in answer.table.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in answer.table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+  {% elif answer.summary %}
+    {# Summary payload remains preserved in collapsed raw evidence. #}
   {% else %}
     <p class="muted">Unsupported structured response kind{% if answer.response_kind %} <code>{{ answer.response_kind }}</code>{% endif %}; its preserved data is shown as JSON.</p>
     <pre class="pre-wrap">{{ answer.fallback_json }}</pre>

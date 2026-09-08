@@ -57,7 +57,10 @@ The certified v1 live table response had `answer_type: "text"`, heading text,
 `columns` and ordered `rows`. This payload is semantically part of the operator
 answer; the heading alone is not a complete observation. A separate certified
 v1 response had `response_kind: "summary"` with generated text, citations, and
-knowledge-base metadata; it is retained as data, not collapsed to heading text.
+knowledge-base metadata. StewardBench supports plain text, `table`, and
+`summary` operator-facing responses: a summary renders its escaped human-readable
+`text` without assuming a payload schema, while its complete payload remains
+immutable structured evidence rather than being collapsed to text.
 
 The adapter preserves the redacted raw response unchanged and also stores a
 versioned immutable `operator_answer` object in Execution response metadata:
@@ -73,7 +76,9 @@ versioned immutable `operator_answer` object in Execution response metadata:
 ```
 
 The observed rectangular table is rendered through StewardBench-owned table
-markup with all target strings escaped. It is never treated as target-supplied
+markup with all target strings escaped. A supported `summary` renders its
+escaped text alone in the primary answer; its variable-shaped payload remains
+available through collapsed raw evidence. Neither is treated as target-supplied
 HTML. Exact comparison canonically includes every stored structured value;
 semantic comparison, evaluators, and the LLM judge receive the same complete
 data-only representation. Unknown future `response_kind` values and malformed

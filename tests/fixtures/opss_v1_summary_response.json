@@ -1,0 +1,16 @@
+{
+  "conversation_id": "synthetic-summary-conversation",
+  "interaction_id": "synthetic-summary-interaction",
+  "answer_type": "text",
+  "text": "AmLight has 4 available transceivers in Chile.",
+  "response_kind": "summary",
+  "response_payload": {
+    "availability": "available",
+    "count": 4,
+    "entity_type": "Transceiver"
+  },
+  "evidence": [
+    {"source": "synthetic-source-shaped-summary-fixture"}
+  ],
+  "metadata": {}
+}

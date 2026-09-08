@@ -233,10 +233,13 @@ Show prominently:
 - resolved bindings;
 - product/target/build/timestamp;
 - execution outcome and any safe error summary;
-- complete operator-facing answer without hiding access to raw answer; a
-  recognized structured table uses StewardBench-owned `<table>` markup with
-  escaped target cells, while an unknown response kind is visibly retained as
-  escaped JSON rather than omitted;
+- complete operator-facing answer without hiding access to raw answer: plain
+  text keeps its existing presentation, a recognized structured table uses
+  StewardBench-owned `<table>` markup with escaped target cells, and a
+  recognized structured summary renders its escaped human-readable text without
+  dumping its variable payload; the complete structured representation remains
+  available in collapsed raw evidence. An unknown response kind is visibly
+  retained as escaped JSON rather than omitted;
 - independent automated result(s);
 - LLM-judge result and dimensions when available;
 - comparison/change status and reason;

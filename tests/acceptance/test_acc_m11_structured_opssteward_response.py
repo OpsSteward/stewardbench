@@ -14,14 +14,19 @@ from pathlib import Path
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from catalog.models import TargetRevision
 from catalog.services import create_target_revision
 from evaluations.adapters import credential_environment_name
-from evaluations.evaluators import JUDGE_DIMENSIONS, DeterministicFakeJudge
+from evaluations.evaluators import (
+    JUDGE_DIMENSIONS,
+    DeterministicFakeEvaluator,
+    DeterministicFakeJudge,
+)
 from evaluations.models import ComparisonItem, Execution
-from evaluations.operator_answers import OPERATOR_ANSWER_METADATA_KEY
+from evaluations.operator_answers import OPERATOR_ANSWER_METADATA_KEY, operator_answer_presentation
 from evaluations.reporting import target_adapter_statuses
 from evaluations.semantic import DeterministicFakeSemanticComparator
 from evaluations.services import (
@@ -36,6 +41,9 @@ from evaluations.services import (
 
 TABLE_FIXTURE = json.loads(
     (Path(__file__).parents[1] / "fixtures" / "opss_v1_table_response.json").read_text()
+)
+SUMMARY_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "opss_v1_summary_response.json").read_text()
 )
 
 
@@ -121,6 +129,151 @@ def _dimensions():
         name: {"result": "strong", "rationale": f"{name} source-fixture rationale"}
         for name in JUDGE_DIMENSIONS
     }
+
+
+@pytest.mark.acceptance
+@pytest.mark.django_db
+def test_acc_m11_structured_summary_is_clean_escaped_and_exported(client, minimal_domain, monkeypatch):
+    """ACC-M11-STRUCT-004: summary text is primary while structured evidence survives."""
+
+    credential_reference = "fixtures/m11-structured-summary"
+    synthetic_credential = "m11-summary-credential-canary"
+    monkeypatch.setenv(credential_environment_name(credential_reference), synthetic_credential)
+    response = copy.deepcopy(SUMMARY_FIXTURE)
+    response["response_payload"]["citation"] = "<script>alert('summary payload')</script>"
+    response["response_payload"]["spreadsheet_note"] = "=SUM(4,5)"
+    expected_operator_answer = {
+        "schema_version": "opss-structured-answer-v1",
+        "answer_type": "text",
+        "text": response["text"],
+        "response_kind": "summary",
+        "response_payload": response["response_payload"],
+    }
+
+    with _opssteward_chat_server(response) as (endpoint, _journal):
+        create_target_revision(
+            actor=minimal_domain["admin"],
+            target=minimal_domain["target"],
+            **_revision_values(endpoint, credential_reference=credential_reference, build="summary-a"),
+        )
+        run, execution = _execute(
+            actor=minimal_domain["admin"], target=minimal_domain["target"], question=minimal_domain["question"]
+        )
+
+    assert execution.response_metadata[OPERATOR_ANSWER_METADATA_KEY] == expected_operator_answer
+    presentation = operator_answer_presentation(execution.response_metadata)
+    assert presentation is not None
+    assert presentation["summary"] is True
+    assert presentation["table"] is None
+    assert presentation["fallback_json"] is None
+    primary_answer = render_to_string(
+        "evaluations/_operator_answer.html",
+        {"answer": presentation, "fallback_answer": execution.display_answer},
+    )
+    assert response["text"] in primary_answer
+    assert "Unsupported structured response kind" not in primary_answer
+    assert "response_payload" not in primary_answer
+
+    # Terminal structured evidence, including arbitrary summary shapes, remains immutable.
+    execution.response_metadata = {}
+    with pytest.raises(ValidationError):
+        execution.save()
+    execution.refresh_from_db()
+
+    client.force_login(minimal_domain["operator"])
+    rendered = client.get(reverse("execution-detail", args=[execution.pk])).content.decode("utf-8")
+    assert response["text"] in rendered
+    assert "Unsupported structured response kind summary" not in rendered
+    assert "&lt;script&gt;alert(&#x27;summary payload&#x27;)&lt;/script&gt;" in rendered
+    assert "<script>alert('summary payload')</script>" not in rendered
+    assert "Raw answer and evidence" in rendered
+
+    json_export = json.loads(client.get(reverse("run-json-export", args=[run.pk])).content)
+    observation = json_export["executions"][0]["observation"]
+    assert observation["operator_answer"] == expected_operator_answer
+    assert observation["response_metadata"][OPERATOR_ANSWER_METADATA_KEY] == expected_operator_answer
+
+    csv_export = client.get(reverse("run-csv-export", args=[run.pk]))
+    rows = list(csv.DictReader(io.StringIO(csv_export.content.decode("utf-8"))))
+    assert rows[0]["raw_answer"] == response["text"]
+    assert "operator_answer" not in rows[0]
+    assert "summary payload" not in csv_export.content.decode("utf-8")
+    assert synthetic_credential not in json.dumps(json_export, ensure_ascii=False)
+
+
+@pytest.mark.acceptance
+@pytest.mark.django_db
+def test_acc_m11_summary_payload_change_reaches_comparison_evaluator_and_judge(minimal_domain, monkeypatch):
+    """ACC-M11-STRUCT-005: summary payload data is not lost after clean rendering."""
+
+    credential_reference = "fixtures/m11-summary-comparison"
+    monkeypatch.setenv(credential_environment_name(credential_reference), "m11-summary-comparison-canary")
+    baseline_response = copy.deepcopy(SUMMARY_FIXTURE)
+    current_response = copy.deepcopy(SUMMARY_FIXTURE)
+    current_response["response_payload"]["count"] = 5
+    assert baseline_response["text"] == current_response["text"]
+
+    with _opssteward_chat_server(baseline_response, current_response) as (endpoint, _journal):
+        create_target_revision(
+            actor=minimal_domain["admin"],
+            target=minimal_domain["target"],
+            **_revision_values(endpoint, credential_reference=credential_reference, build="summary-baseline"),
+        )
+        source_run, source = _execute(
+            actor=minimal_domain["admin"], target=minimal_domain["target"], question=minimal_domain["question"]
+        )
+        baseline = create_baseline(actor=minimal_domain["admin"], source_run=source_run, name="M11 summary baseline")
+        create_target_revision(
+            actor=minimal_domain["admin"],
+            target=minimal_domain["target"],
+            **_revision_values(endpoint, credential_reference=credential_reference, build="summary-current"),
+        )
+        current_run = launch_controlled_comparison(
+            actor=minimal_domain["admin"], baseline=baseline, target=minimal_domain["target"]
+        )
+        assert process_next_execution() is True
+        current = current_run.executions.get()
+        item = current.current_comparison_items.get()
+
+    assert item.change_state == ComparisonItem.ChangeState.CHANGED
+    assert item.exact_equal is False
+    assert source.display_answer == current.display_answer == baseline_response["text"]
+
+    comparator = DeterministicFakeSemanticComparator([{"outcome": "MATERIAL_CHANGE"}])
+    semantic = reevaluate_semantic_comparison(
+        actor=minimal_domain["admin"], comparison_item=item, comparator=comparator
+    )
+    assert semantic.outcome == "MATERIAL_CHANGE"
+    assert '"count":4' in comparator.calls[0].baseline_answer
+    assert '"count":5' in comparator.calls[0].current_answer
+
+    evaluator = DeterministicFakeEvaluator([{"outcome": "PASS"}])
+    evaluator_result = reevaluate_stored_answer(
+        actor=minimal_domain["admin"], execution=current, evaluator=evaluator
+    )
+    assert evaluator_result.status == "COMPLETE"
+    assert '"response_payload"' in evaluator.calls[0].product_answer
+    assert '"count":5' in evaluator.calls[0].product_answer
+
+    judge = DeterministicFakeJudge([{"dimensions": _dimensions(), "advisory_disposition": "STRONG"}])
+    judge_result = reevaluate_stored_answer(actor=minimal_domain["admin"], execution=current, judge=judge)
+    assert judge_result.status == "COMPLETE"
+    assert '"response_payload"' in judge.calls[0].product_answer
+    assert '"count":5' in judge.calls[0].product_answer
+
+
+@pytest.mark.acceptance
+def test_acc_m11_plain_text_presentation_retains_existing_fallback():
+    """ACC-M11-STRUCT-006: no structured metadata keeps the original text path."""
+
+    plain_text = "Resposta Unicode: São Paulo — ✓"
+    assert operator_answer_presentation({}) is None
+    rendered = render_to_string(
+        "evaluations/_operator_answer.html",
+        {"answer": None, "fallback_answer": plain_text},
+    )
+    assert plain_text in rendered
+    assert "Unsupported structured response kind" not in rendered
 
 
 @pytest.mark.acceptance
